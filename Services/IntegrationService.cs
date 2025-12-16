@@ -68,10 +68,10 @@ public class IntegrationService : BackgroundService
                 _logger.LogInformation($"Processando {produtos.Count} produtos para atualizar no banco...");
                 Console.WriteLine($"Processando {produtos.Count} produtos para atualizar no banco...");
                 
-                var (processados, erros) = await _databaseService.UpsertProductsAsync(produtos);
+                var (inseridos, atualizados, erros) = await _databaseService.UpsertProductsAsync(produtos);
                 
-                _logger.LogInformation($"Produtos atualizados no banco: {processados} processados, {erros} erros");
-                Console.WriteLine($"Produtos atualizados no banco: {processados} processados, {erros} erros");
+                _logger.LogInformation($"Produtos processados no banco: {inseridos} INSERIDOS (novos), {atualizados} ATUALIZADOS (existentes), {erros} erros");
+                Console.WriteLine($"Produtos processados no banco: {inseridos} INSERIDOS (novos), {atualizados} ATUALIZADOS (existentes), {erros} erros");
             }
         }
         catch (Exception ex)
@@ -127,36 +127,42 @@ public class IntegrationService : BackgroundService
 
                 foreach (var produto in produtos)
                 {
-                    // USA APENAS GTIN como chave (nunca código/SKU)
-                    var chaveProduto = produto.Gtin;
+                    // BAR_CODE = GTIN (prioridade) ou Código (fallback)
+                    var barCode = produto.Gtin ?? produto.Codigo ?? "";
                     
-                    if (string.IsNullOrEmpty(chaveProduto))
+                    if (string.IsNullOrEmpty(barCode))
                     {
-                        // Ignora produtos sem GTIN
+                        // Ignora produtos sem GTIN e sem código
                         continue;
                     }
 
-                    // Verifica se o preço mudou ou se é um novo produto
-                    if (_productCache.TryGetValue(chaveProduto, out var produtoCache))
+                    // Verifica se produto existe no banco de dados (não apenas no cache local)
+                    var existeNoBanco = await _databaseService.ProductExistsAsync(barCode);
+                    
+                    // Verifica se está no cache local (para detectar mudanças)
+                    var existeNoCache = _productCache.TryGetValue(barCode, out var produtoCache);
+                    
+                    if (existeNoCache && produtoCache != null)
                     {
-                        // Verifica se houve mudança de preço
+                        // Produto existe no cache - verifica se houve mudança
                         bool precoMudou = produtoCache.Preco != produto.Preco || 
                                          produtoCache.PrecoPromocional != produto.PrecoPromocional;
+                        bool descricaoMudou = produtoCache.Nome != produto.Nome;
                         
-                        if (precoMudou)
+                        if (precoMudou || descricaoMudou)
                         {
-                            _logger.LogInformation($"Preço alterado para produto {produto.Nome} (Código: {chaveProduto}) - " +
+                            _logger.LogInformation($"Produto alterado: {produto.Nome} (BAR_CODE: {barCode}) - " +
                                                   $"Preço anterior: {produtoCache.Preco}, Novo preço: {produto.Preco}");
                             
                             // Atualiza cache local
-                            _productCache[chaveProduto] = produto;
+                            _productCache[barCode] = produto;
                             
-                            // Atualiza produto no banco de dados
+                            // UPSERT: Se GTIN já existe no banco, ATUALIZA. Se não existe, INSERE.
                             try
                             {
-                                await _databaseService.UpdateProductAsync(produto);
-                                _logger.LogInformation($"Produto atualizado no banco: {produto.Nome} - GTIN: {chaveProduto}");
-                                Console.WriteLine($"Produto atualizado no banco: {produto.Nome} - GTIN: {chaveProduto}");
+                                await _databaseService.UpsertProductAsync(produto);
+                                _logger.LogInformation($"Produto atualizado no banco: {produto.Nome} - BAR_CODE: {barCode}");
+                                Console.WriteLine($"Produto atualizado no banco: {produto.Nome} - BAR_CODE: {barCode}");
                                 produtosAtualizados++;
                             }
                             catch (Exception dbEx)
@@ -164,31 +170,45 @@ public class IntegrationService : BackgroundService
                                 _logger.LogWarning(dbEx, $"Erro ao atualizar produto no banco: {produto.Nome}");
                             }
                         }
+                        else
+                        {
+                            // Produto não mudou, apenas atualiza cache local
+                            _productCache[barCode] = produto;
+                        }
                     }
                     else
                     {
-                        // Novo produto - adiciona ao cache e insere no banco
-                        _productCache[chaveProduto] = produto;
-                        produtosNovos++;
+                        // Produto não está no cache local
+                        _productCache[barCode] = produto;
                         
-                        // Insere novo produto no banco de dados
-                        try
+                        if (!existeNoBanco)
                         {
-                            await _databaseService.InsertProductAsync(produto);
-                        }
-                        catch (Exception dbEx)
-                        {
-                            _logger.LogWarning(dbEx, $"Erro ao adicionar novo produto no banco: {produto.Nome}");
-                        }
-                        
-                        if (primeiraExecucao)
-                        {
-                            _logger.LogDebug($"Novo produto adicionado: {produto.Nome} (GTIN: {chaveProduto})");
+                            // NOVO PRODUTO: GTIN não existe no banco - INSERE
+                            produtosNovos++;
+                            try
+                            {
+                                await _databaseService.UpsertProductAsync(produto);
+                                _logger.LogInformation($"NOVO produto INSERIDO no banco: {produto.Nome} (BAR_CODE: {barCode}, PRICE_1: {produto.Preco}, PRICE_2: {produto.PrecoPromocional})");
+                                Console.WriteLine($"NOVO produto INSERIDO: {produto.Nome} - BAR_CODE: {barCode}");
+                            }
+                            catch (Exception dbEx)
+                            {
+                                _logger.LogWarning(dbEx, $"Erro ao inserir novo produto no banco: {produto.Nome}");
+                            }
                         }
                         else
                         {
-                            _logger.LogInformation($"Novo produto detectado: {produto.Nome} (GTIN: {chaveProduto})");
-                            Console.WriteLine($"Novo produto detectado: {produto.Nome} (GTIN: {chaveProduto})");
+                            // Produto existe no banco mas não no cache - atualiza para sincronizar
+                            try
+                            {
+                                await _databaseService.UpsertProductAsync(produto);
+                                _logger.LogDebug($"Produto sincronizado: {produto.Nome} (BAR_CODE: {barCode})");
+                                produtosAtualizados++;
+                            }
+                            catch (Exception dbEx)
+                            {
+                                _logger.LogWarning(dbEx, $"Erro ao sincronizar produto no banco: {produto.Nome}");
+                            }
                         }
                     }
                 }
@@ -212,8 +232,8 @@ public class IntegrationService : BackgroundService
                     // Produtos já foram atualizados individualmente no banco durante o loop
                     if (produtosAtualizados > 0 || produtosNovos > 0)
                     {
-                        _logger.LogInformation($"Banco atualizado: {produtosAtualizados} produtos modificados, {produtosNovos} produtos novos adicionados");
-                        Console.WriteLine($"Banco atualizado: {produtosAtualizados} produtos modificados, {produtosNovos} produtos novos adicionados");
+                        _logger.LogInformation($"Banco atualizado: {produtosNovos} produtos INSERIDOS (novos), {produtosAtualizados} produtos ATUALIZADOS (modificados)");
+                        Console.WriteLine($"Banco atualizado: {produtosNovos} produtos INSERIDOS (novos), {produtosAtualizados} produtos ATUALIZADOS (modificados)");
                     }
                 }
                 
@@ -226,10 +246,10 @@ public class IntegrationService : BackgroundService
                 }
                 else
                 {
-                    _logger.LogInformation($"Atualização concluída: {produtosAtualizados} produtos atualizados, " +
-                                          $"{produtosNovos} produtos novos. Banco atualizado. Próxima verificação em {intervalMinutes} minuto(s).");
-                    Console.WriteLine($"Atualização concluída: {produtosAtualizados} produtos atualizados, " +
-                                     $"{produtosNovos} produtos novos. Próxima verificação em {intervalMinutes} minuto(s).");
+                    _logger.LogInformation($"Atualização concluída: {produtosNovos} produtos INSERIDOS (novos), " +
+                                          $"{produtosAtualizados} produtos ATUALIZADOS (modificados). Banco atualizado. Próxima verificação em {intervalMinutes} minuto(s).");
+                    Console.WriteLine($"Atualização concluída: {produtosNovos} produtos INSERIDOS (novos), " +
+                                     $"{produtosAtualizados} produtos ATUALIZADOS (modificados). Próxima verificação em {intervalMinutes} minuto(s).");
                 }
             }
             catch (Exception ex)

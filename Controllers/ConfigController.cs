@@ -117,12 +117,13 @@ public class ConfigController : ControllerBase
                 return BadRequest(new { message = "Nenhum produto encontrado na API" });
             }
 
-            var (processados, erros) = await _databaseService.UpsertProductsAsync(produtos);
+            var (inseridos, atualizados, erros) = await _databaseService.UpsertProductsAsync(produtos);
             
             return Ok(new 
             { 
                 message = "Banco de dados atualizado com sucesso",
-                processados = processados,
+                inseridos = inseridos,
+                atualizados = atualizados,
                 erros = erros,
                 total = produtos.Count
             });

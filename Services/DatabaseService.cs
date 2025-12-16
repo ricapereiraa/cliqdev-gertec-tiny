@@ -56,127 +56,61 @@ public class DatabaseService : IDisposable
     }
 
     /// <summary>
-    /// Insere um novo produto no banco de dados
+    /// Insere um novo produto no banco de dados (usa UPSERT para garantir que atualiza se já existe)
     /// </summary>
     public async Task<bool> InsertProductAsync(Produto produto)
     {
-        try
-        {
-            var barCode = produto.Gtin ?? produto.Codigo ?? "";
-            if (string.IsNullOrEmpty(barCode))
-            {
-                _logger.LogWarning($"Produto {produto.Nome} ignorado: sem código de barras");
-                return false;
-            }
-
-            var description = produto.Nome?.Replace("'", "''") ?? "";
-            var price1 = ParsePrice(produto.Preco);
-            var price2 = ParsePrice(produto.PrecoPromocional);
-
-            await using var connection = new NpgsqlConnection(_connectionString);
-            await connection.OpenAsync();
-            
-            var query = $@"
-                INSERT INTO {_tableName} (BAR_CODE, DESCRIPTION, PRICE_1, PRICE_2, UPDATED_AT)
-                VALUES (@barCode, @description, @price1, @price2, CURRENT_TIMESTAMP)
-                ON CONFLICT (BAR_CODE) DO NOTHING;";
-            
-            await using var cmd = new NpgsqlCommand(query, connection);
-            cmd.Parameters.AddWithValue("barCode", barCode);
-            cmd.Parameters.AddWithValue("description", description);
-            cmd.Parameters.AddWithValue("price1", price1);
-            cmd.Parameters.AddWithValue("price2", price2);
-            
-            var rowsAffected = await cmd.ExecuteNonQueryAsync();
-            
-            if (rowsAffected > 0)
-            {
-                _logger.LogInformation($"Produto inserido: {description} (BAR_CODE: {barCode})");
-                return true;
-            }
-            
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Erro ao inserir produto: {ex.Message}");
-            return false;
-        }
+        // Usa UpsertProductAsync para garantir que não cria duplicado se já existe
+        return await UpsertProductAsync(produto);
     }
 
     /// <summary>
-    /// Atualiza um produto existente no banco de dados
+    /// Atualiza um produto existente no banco de dados (usa UPSERT para garantir atualização)
     /// </summary>
     public async Task<bool> UpdateProductAsync(Produto produto)
     {
-        try
-        {
-            var barCode = produto.Gtin ?? produto.Codigo ?? "";
-            if (string.IsNullOrEmpty(barCode))
-            {
-                _logger.LogWarning($"Produto {produto.Nome} ignorado: sem código de barras");
-                return false;
-            }
-
-            var description = produto.Nome?.Replace("'", "''") ?? "";
-            var price1 = ParsePrice(produto.Preco);
-            var price2 = ParsePrice(produto.PrecoPromocional);
-
-            await using var connection = new NpgsqlConnection(_connectionString);
-            await connection.OpenAsync();
-            
-            var query = $@"
-                UPDATE {_tableName}
-                SET DESCRIPTION = @description,
-                    PRICE_1 = @price1,
-                    PRICE_2 = @price2,
-                    UPDATED_AT = CURRENT_TIMESTAMP
-                WHERE BAR_CODE = @barCode;";
-            
-            await using var cmd = new NpgsqlCommand(query, connection);
-            cmd.Parameters.AddWithValue("barCode", barCode);
-            cmd.Parameters.AddWithValue("description", description);
-            cmd.Parameters.AddWithValue("price1", price1);
-            cmd.Parameters.AddWithValue("price2", price2);
-            
-            var rowsAffected = await cmd.ExecuteNonQueryAsync();
-            
-            if (rowsAffected > 0)
-            {
-                _logger.LogInformation($"Produto atualizado: {description} (BAR_CODE: {barCode})");
-                return true;
-            }
-            
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Erro ao atualizar produto: {ex.Message}");
-            return false;
-        }
+        // Usa UpsertProductAsync para garantir que atualiza se existe ou insere se não existe
+        return await UpsertProductAsync(produto);
     }
 
     /// <summary>
-    /// Insere ou atualiza um produto (UPSERT) baseado no código de barras
+    /// Insere ou atualiza um produto (UPSERT) baseado no código de barras (GTIN)
+    /// Mapeamento conforme padrão: BAR_CODE=GTIN, DESCRIPTION=Nome, PRICE_1=Preço, PRICE_2=PreçoPromocional
+    /// Se o BAR_CODE já existe, ATUALIZA os dados. Se não existe, INSERE novo.
     /// </summary>
     public async Task<bool> UpsertProductAsync(Produto produto)
     {
         try
         {
+            // BAR_CODE = GTIN (prioridade) ou Código (fallback) - conforme mapeamento da imagem
             var barCode = produto.Gtin ?? produto.Codigo ?? "";
             if (string.IsNullOrEmpty(barCode))
             {
-                _logger.LogWarning($"Produto {produto.Nome} ignorado: sem código de barras");
+                _logger.LogWarning($"Produto {produto.Nome} ignorado: sem código de barras (GTIN ou código)");
                 return false;
             }
 
+            // DESCRIPTION = Nome do produto - conforme mapeamento da imagem
             var description = produto.Nome?.Replace("'", "''") ?? "";
+            if (string.IsNullOrEmpty(description))
+            {
+                description = "Produto sem nome";
+            }
+            
+            // PRICE_1 = Preço normal - conforme mapeamento da imagem
             var price1 = ParsePrice(produto.Preco);
+            
+            // PRICE_2 = Preço promocional - conforme mapeamento da imagem
             var price2 = ParsePrice(produto.PrecoPromocional);
+
+            // Verifica se produto já existe antes do UPSERT
+            var jaExiste = await ProductExistsAsync(barCode);
 
             await using var connection = new NpgsqlConnection(_connectionString);
             await connection.OpenAsync();
             
+            // UPSERT: Se BAR_CODE (GTIN) já existe, ATUALIZA. Se não existe, INSERE novo.
+            // Conforme padrão: BAR_CODE é chave primária, então mesmo GTIN = atualiza, não cria duplicado
             var query = $@"
                 INSERT INTO {_tableName} (BAR_CODE, DESCRIPTION, PRICE_1, PRICE_2, UPDATED_AT)
                 VALUES (@barCode, @description, @price1, @price2, CURRENT_TIMESTAMP)
@@ -197,7 +131,16 @@ public class DatabaseService : IDisposable
             
             if (rowsAffected > 0)
             {
-                _logger.LogDebug($"Produto processado: {description} (BAR_CODE: {barCode})");
+                if (jaExiste)
+                {
+                    _logger.LogInformation($"Produto ATUALIZADO no banco: BAR_CODE={barCode}, DESCRIPTION={description}, PRICE_1={price1}, PRICE_2={price2}");
+                    Console.WriteLine($"Produto ATUALIZADO: {description} (BAR_CODE: {barCode})");
+                }
+                else
+                {
+                    _logger.LogInformation($"NOVO produto INSERIDO no banco: BAR_CODE={barCode}, DESCRIPTION={description}, PRICE_1={price1}, PRICE_2={price2}");
+                    Console.WriteLine($"NOVO produto INSERIDO: {description} (BAR_CODE: {barCode})");
+                }
                 return true;
             }
             
@@ -262,20 +205,38 @@ public class DatabaseService : IDisposable
 
     /// <summary>
     /// Processa múltiplos produtos usando UPSERT (mais eficiente)
+    /// Retorna: (inseridos, atualizados, erros)
     /// </summary>
-    public async Task<(int processados, int erros)> UpsertProductsAsync(List<Produto> produtos)
+    public async Task<(int inseridos, int atualizados, int erros)> UpsertProductsAsync(List<Produto> produtos)
     {
-        int processados = 0;
+        int inseridos = 0;
+        int atualizados = 0;
         int erros = 0;
 
         foreach (var produto in produtos)
         {
             try
             {
+                var barCode = produto.Gtin ?? produto.Codigo ?? "";
+                if (string.IsNullOrEmpty(barCode))
+                {
+                    continue;
+                }
+
+                // Verifica se produto já existe antes do UPSERT
+                var jaExiste = await ProductExistsAsync(barCode);
+                
                 var success = await UpsertProductAsync(produto);
                 if (success)
                 {
-                    processados++;
+                    if (jaExiste)
+                    {
+                        atualizados++;
+                    }
+                    else
+                    {
+                        inseridos++;
+                    }
                 }
             }
             catch (Exception ex)
@@ -285,7 +246,7 @@ public class DatabaseService : IDisposable
             }
         }
 
-        return (processados, erros);
+        return (inseridos, atualizados, erros);
     }
 
     /// <summary>
