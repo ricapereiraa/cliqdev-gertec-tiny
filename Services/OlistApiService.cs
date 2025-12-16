@@ -171,38 +171,9 @@ public class OlistApiService
                 }
             }
             
-            // Se encontrou no cache, busca imagem se necessário e retorna
+            // Se encontrou no cache, retorna
             if (produtoCache != null)
             {
-                // Se precisa de imagem e ainda não tem, busca via produto.obter.php (assíncrono, não bloqueia)
-                if (produtoCache.Id > 0 && string.IsNullOrEmpty(produtoCache.Imagem))
-                {
-                    try
-                    {
-                        var produtoComImagem = await GetProductByIdAsync(produtoCache.Id);
-                        if (produtoComImagem != null && !string.IsNullOrEmpty(produtoComImagem.Imagem))
-                        {
-                            produtoCache.Imagem = produtoComImagem.Imagem;
-                            produtoCache.ImagemPrincipal = produtoComImagem.ImagemPrincipal;
-                            
-                            // Atualiza no cache
-                            lock (_cacheLock)
-                            {
-                                if (!string.IsNullOrEmpty(produtoCache.Gtin))
-                                    _gtinCache[produtoCache.Gtin] = produtoCache;
-                                if (!string.IsNullOrEmpty(produtoCache.Codigo))
-                                    _codigoCache[produtoCache.Codigo] = produtoCache;
-                            }
-                            
-                            _logger.LogDebug($"Imagem obtida para produto {produtoCache.Nome}: {produtoCache.Imagem}");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, $"Erro ao buscar imagem do produto {produtoCache.Id}, continuando sem imagem...");
-                    }
-                }
-                
                 return produtoCache;
             }
             

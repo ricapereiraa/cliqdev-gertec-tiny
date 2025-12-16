@@ -7,7 +7,7 @@ public class IntegrationService : BackgroundService
 {
     private readonly ILogger<IntegrationService> _logger;
     private readonly OlistApiService _olistService;
-    private readonly GertecDataFileService _dataFileService;
+    private readonly DatabaseService _databaseService;
     private readonly IConfiguration _configuration;
     private DateTime? _lastSyncDate;
     private readonly Dictionary<string, Produto> _productCache = new();
@@ -15,12 +15,12 @@ public class IntegrationService : BackgroundService
     public IntegrationService(
         ILogger<IntegrationService> logger,
         OlistApiService olistService,
-        GertecDataFileService dataFileService,
+        DatabaseService databaseService,
         IConfiguration configuration)
     {
         _logger = logger;
         _olistService = olistService;
-        _dataFileService = dataFileService;
+        _databaseService = databaseService;
         _configuration = configuration;
     }
 
@@ -28,19 +28,15 @@ public class IntegrationService : BackgroundService
     {
         _logger.LogInformation("Serviço de integração iniciado");
 
-        // PASSO 1: Garante que arquivo existe ANTES de qualquer operação
-        _logger.LogInformation("Garantindo que arquivo existe ANTES de buscar produtos...");
-        Console.WriteLine("Garantindo que arquivo existe ANTES de buscar produtos...");
-        if (!_dataFileService.FileExists())
+        // PASSO 1: Testa conexão com banco de dados
+        _logger.LogInformation("Testando conexão com banco de dados...");
+        Console.WriteLine("Testando conexão com banco de dados...");
+        var conexaoOk = await _databaseService.TestConnectionAsync();
+        if (!conexaoOk)
         {
-            _logger.LogInformation("Criando arquivo vazio ANTES de buscar produtos...");
-            Console.WriteLine("Criando arquivo vazio ANTES de buscar produtos...");
-            await _dataFileService.CreateEmptyFileAsync();
-        }
-        else
-        {
-            _logger.LogInformation("Arquivo já existe, será atualizado com produtos encontrados");
-            Console.WriteLine("Arquivo já existe, será atualizado com produtos encontrados");
+            _logger.LogError("ERRO: Não foi possível conectar ao banco de dados. Verifique as configurações.");
+            Console.WriteLine("ERRO: Nao foi possivel conectar ao banco de dados. Verifique as configuracoes.");
+            return;
         }
 
         // PASSO 2: Pré-carrega cache de produtos na inicialização
@@ -55,34 +51,38 @@ public class IntegrationService : BackgroundService
             _logger.LogError(ex, "Erro ao pré-carregar cache. Continuando sem cache pré-carregado...");
         }
 
-        // PASSO 3: Busca produtos e registra no arquivo (arquivo já existe, será atualizado)
-        _logger.LogInformation("Buscando produtos e registrando no arquivo...");
-        Console.WriteLine("Buscando produtos e registrando no arquivo...");
+        // PASSO 3: Busca produtos e atualiza no banco de dados
+        _logger.LogInformation("Buscando produtos e atualizando no banco de dados...");
+        Console.WriteLine("Buscando produtos e atualizando no banco de dados...");
         try
         {
-            var sucesso = await _dataFileService.GenerateDataFileAsync();
-            if (sucesso)
+            var produtos = await _olistService.GetAllProductsAsync(null);
+            
+            if (produtos == null || produtos.Count == 0)
             {
-                var caminho = _dataFileService.GetDataFilePath();
-                var existe = _dataFileService.FileExists();
-                _logger.LogInformation($"Produtos registrados no arquivo. Caminho: {caminho}, Existe: {existe}");
-                Console.WriteLine($"Produtos registrados no arquivo. Caminho: {caminho}, Existe: {existe}");
+                _logger.LogWarning("Nenhum produto encontrado na API");
+                Console.WriteLine("AVISO: Nenhum produto encontrado na API");
             }
             else
             {
-                _logger.LogWarning("Falha ao registrar produtos no arquivo");
-                Console.WriteLine("AVISO: Falha ao registrar produtos no arquivo");
+                _logger.LogInformation($"Processando {produtos.Count} produtos para atualizar no banco...");
+                Console.WriteLine($"Processando {produtos.Count} produtos para atualizar no banco...");
+                
+                var (processados, erros) = await _databaseService.UpsertProductsAsync(produtos);
+                
+                _logger.LogInformation($"Produtos atualizados no banco: {processados} processados, {erros} erros");
+                Console.WriteLine($"Produtos atualizados no banco: {processados} processados, {erros} erros");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao registrar produtos no arquivo. Continuando...");
-            Console.WriteLine($"ERRO ao registrar produtos no arquivo: {ex.Message}");
+            _logger.LogError(ex, "Erro ao atualizar produtos no banco de dados. Continuando...");
+            Console.WriteLine($"ERRO ao atualizar produtos no banco: {ex.Message}");
         }
 
-        // Inicia monitoramento automático - busca atualizações e atualiza arquivo a cada 1 minuto
-        _logger.LogInformation("Monitoramento automático iniciado - atualizando arquivo a cada 1 minuto");
-        Console.WriteLine("Monitoramento automático iniciado - atualizando arquivo a cada 1 minuto");
+        // Inicia monitoramento automático - busca atualizações e atualiza banco a cada 1 minuto
+        _logger.LogInformation("Monitoramento automático iniciado - atualizando banco a cada 1 minuto");
+        Console.WriteLine("Monitoramento automático iniciado - atualizando banco a cada 1 minuto");
         _ = Task.Run(() => MonitorPriceChangesAsync(stoppingToken), stoppingToken);
 
         // Mantém o serviço rodando
@@ -93,27 +93,6 @@ public class IntegrationService : BackgroundService
     }
 
 
-    private string FormatProductName(string nome)
-    {
-        // Formata para 4 linhas x 20 colunas (80 bytes total)
-        // Divide o nome em até 4 linhas de 20 caracteres cada
-        var linhas = new List<string>();
-        var nomeLimpo = nome.Replace("\n", " ").Replace("\r", "");
-
-        for (int i = 0; i < 4 && i * 20 < nomeLimpo.Length; i++)
-        {
-            var linha = nomeLimpo.Substring(i * 20, Math.Min(20, nomeLimpo.Length - i * 20));
-            linhas.Add(linha);
-        }
-
-        // Preenche até 4 linhas
-        while (linhas.Count < 4)
-        {
-            linhas.Add(new string(' ', 20));
-        }
-
-        return string.Join("", linhas);
-    }
 
     private async Task MonitorPriceChangesAsync(CancellationToken cancellationToken)
     {
@@ -172,34 +151,34 @@ public class IntegrationService : BackgroundService
                             // Atualiza cache local
                             _productCache[chaveProduto] = produto;
                             
-                            // Atualiza arquivo TXT para servidor TCP oficial
+                            // Atualiza produto no banco de dados
                             try
                             {
-                                await _dataFileService.UpdateProductInFileAsync(produto);
-                                _logger.LogInformation($"Produto atualizado no arquivo: {produto.Nome} - GTIN: {chaveProduto}");
-                                Console.WriteLine($"Produto atualizado no arquivo: {produto.Nome} - GTIN: {chaveProduto}");
+                                await _databaseService.UpdateProductAsync(produto);
+                                _logger.LogInformation($"Produto atualizado no banco: {produto.Nome} - GTIN: {chaveProduto}");
+                                Console.WriteLine($"Produto atualizado no banco: {produto.Nome} - GTIN: {chaveProduto}");
                                 produtosAtualizados++;
                             }
-                            catch (Exception fileEx)
+                            catch (Exception dbEx)
                             {
-                                _logger.LogWarning(fileEx, $"Erro ao atualizar produto no arquivo de dados: {produto.Nome}");
+                                _logger.LogWarning(dbEx, $"Erro ao atualizar produto no banco: {produto.Nome}");
                             }
                         }
                     }
                     else
                     {
-                        // Novo produto - adiciona ao cache e atualiza arquivo
+                        // Novo produto - adiciona ao cache e insere no banco
                         _productCache[chaveProduto] = produto;
                         produtosNovos++;
                         
-                        // Atualiza arquivo TXT para novo produto
+                        // Insere novo produto no banco de dados
                         try
                         {
-                            await _dataFileService.UpdateProductInFileAsync(produto);
+                            await _databaseService.InsertProductAsync(produto);
                         }
-                        catch (Exception fileEx)
+                        catch (Exception dbEx)
                         {
-                            _logger.LogWarning(fileEx, $"Erro ao adicionar novo produto no arquivo: {produto.Nome}");
+                            _logger.LogWarning(dbEx, $"Erro ao adicionar novo produto no banco: {produto.Nome}");
                         }
                         
                         if (primeiraExecucao)
@@ -230,18 +209,17 @@ public class IntegrationService : BackgroundService
                         _logger.LogError(ex, "Erro ao atualizar cache do OlistApiService");
                     }
 
-                    // Apenas atualiza produtos individuais no arquivo existente (não regenera tudo)
-                    // O arquivo já foi criado na inicialização, apenas atualizamos produtos modificados
+                    // Produtos já foram atualizados individualmente no banco durante o loop
                     if (produtosAtualizados > 0 || produtosNovos > 0)
                     {
-                        _logger.LogInformation($"Arquivo atualizado: {produtosAtualizados} produtos modificados, {produtosNovos} produtos novos adicionados");
-                        Console.WriteLine($"Arquivo atualizado: {produtosAtualizados} produtos modificados, {produtosNovos} produtos novos adicionados");
+                        _logger.LogInformation($"Banco atualizado: {produtosAtualizados} produtos modificados, {produtosNovos} produtos novos adicionados");
+                        Console.WriteLine($"Banco atualizado: {produtosAtualizados} produtos modificados, {produtosNovos} produtos novos adicionados");
                     }
                 }
                 
                 if (primeiraExecucao)
                 {
-                    _logger.LogInformation($"Sincronização inicial concluída: {produtos.Count} produtos no arquivo. " +
+                    _logger.LogInformation($"Sincronização inicial concluída: {produtos.Count} produtos no banco. " +
                                           $"Próxima verificação em {intervalMinutes} minuto(s).");
                     Console.WriteLine($"Sincronização inicial concluída: {produtos.Count} produtos. Próxima verificação em {intervalMinutes} minuto(s).");
                     primeiraExecucao = false;
@@ -249,7 +227,7 @@ public class IntegrationService : BackgroundService
                 else
                 {
                     _logger.LogInformation($"Atualização concluída: {produtosAtualizados} produtos atualizados, " +
-                                          $"{produtosNovos} produtos novos. Arquivo atualizado. Próxima verificação em {intervalMinutes} minuto(s).");
+                                          $"{produtosNovos} produtos novos. Banco atualizado. Próxima verificação em {intervalMinutes} minuto(s).");
                     Console.WriteLine($"Atualização concluída: {produtosAtualizados} produtos atualizados, " +
                                      $"{produtosNovos} produtos novos. Próxima verificação em {intervalMinutes} minuto(s).");
                 }

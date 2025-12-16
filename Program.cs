@@ -53,7 +53,7 @@ builder.Services.Configure<GertecConfig>(
 
 // Serviços
 builder.Services.AddHttpClient<OlistApiService>();
-builder.Services.AddSingleton<GertecDataFileService>();
+builder.Services.AddSingleton<DatabaseService>();
 
 builder.Services.AddHostedService<IntegrationService>();
 

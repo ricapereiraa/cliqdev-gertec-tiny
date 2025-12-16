@@ -9,7 +9,7 @@ public class GertecProtocolService : IDisposable
 {
     private readonly ILogger<GertecProtocolService> _logger;
     private readonly GertecConfig _config;
-    private readonly GertecProductCacheService _productCache;
+    private readonly OlistApiService _olistService;
     private TcpListener? _tcpListener;
     private TcpClient? _tcpClient;
     private NetworkStream? _stream;
@@ -23,11 +23,11 @@ public class GertecProtocolService : IDisposable
     public GertecProtocolService(
         ILogger<GertecProtocolService> logger, 
         GertecConfig config,
-        GertecProductCacheService productCache)
+        OlistApiService olistService)
     {
         _logger = logger;
         _config = config;
-        _productCache = productCache;
+        _olistService = olistService;
     }
 
     /// <summary>
@@ -336,44 +336,34 @@ public class GertecProtocolService : IDisposable
     {
         try
         {
-            // Recarrega produtos se arquivo foi modificado
-            await _productCache.RefreshIfNeededAsync();
-
-            // Busca produto no cache (arquivo TXT)
-            var produto = _productCache.GetProductByGtin(barcode);
+            // Busca produto na API
+            var produto = await _olistService.GetProductByBarcodeAsync(barcode);
 
             if (produto != null)
             {
                 _logger.LogInformation($"Produto encontrado: {produto.Nome} - Preço: {produto.Preco}");
                 Console.WriteLine($"Produto encontrado: {produto.Nome} - Preço: {produto.Preco}");
 
-                // Envia imagem se disponível (antes de enviar nome e preço)
-                if (!string.IsNullOrEmpty(produto.Imagem))
+                // Usa preço promocional se disponível, senão usa preço normal
+                var preco = !string.IsNullOrEmpty(produto.PrecoPromocional) && 
+                           decimal.TryParse(produto.PrecoPromocional, out var precoPromo) && 
+                           precoPromo > 0
+                    ? produto.PrecoPromocional 
+                    : produto.Preco;
+
+                if (string.IsNullOrEmpty(preco))
                 {
-                    try
-                    {
-                        _logger.LogInformation($"Enviando imagem do produto: {produto.Imagem}");
-                        Console.WriteLine($"Enviando imagem do produto: {produto.Nome}");
-                        var imagemEnviada = await SendImageFromFileAsync(produto.Imagem, indice: 0, numeroLoops: 1, tempoExibicao: 5);
-                        if (imagemEnviada)
-                        {
-                            Console.WriteLine($"Imagem enviada com sucesso: {produto.Nome}");
-                        }
-                    }
-                    catch (Exception imgEx)
-                    {
-                        _logger.LogWarning(imgEx, $"Erro ao enviar imagem do produto {produto.Nome}. Continuando com nome e preço...");
-                    }
+                    preco = "0.00";
                 }
 
                 // Formata nome para 4 linhas x 20 colunas (80 bytes)
                 var nomeFormatado = FormatProductName(produto.Nome);
                 
                 // Envia nome e preço para o Gertec
-                await SendProductInfoAsync(nomeFormatado, produto.Preco);
+                await SendProductInfoAsync(nomeFormatado, preco);
                 
-                _logger.LogInformation($"ENVIADO para Gertec: {produto.Nome} - {produto.Preco}");
-                Console.WriteLine($"ENVIADO para Gertec: {produto.Nome} - {produto.Preco}");
+                _logger.LogInformation($"ENVIADO para Gertec: {produto.Nome} - {preco}");
+                Console.WriteLine($"ENVIADO para Gertec: {produto.Nome} - {preco}");
             }
             else
             {

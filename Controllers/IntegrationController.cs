@@ -10,16 +10,16 @@ public class IntegrationController : ControllerBase
 {
     private readonly ILogger<IntegrationController> _logger;
     private readonly OlistApiService _olistService;
-    private readonly GertecDataFileService _dataFileService;
+    private readonly DatabaseService _databaseService;
 
     public IntegrationController(
         ILogger<IntegrationController> logger,
         OlistApiService olistService,
-        GertecDataFileService dataFileService)
+        DatabaseService databaseService)
     {
         _logger = logger;
         _olistService = olistService;
-        _dataFileService = dataFileService;
+        _databaseService = databaseService;
     }
 
     [HttpGet("status")]
@@ -28,8 +28,6 @@ public class IntegrationController : ControllerBase
         return Ok(new
         {
             serviceRunning = true,
-            dataFileExists = _dataFileService.FileExists(),
-            dataFilePath = _dataFileService.GetDataFilePath(),
             timestamp = DateTime.Now
         });
     }
@@ -50,23 +48,25 @@ public class IntegrationController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("Iniciando sincronização manual de produtos do Tiny ERP para arquivo...");
-            Console.WriteLine("Iniciando sincronização manual de produtos do Tiny ERP para arquivo...");
+            _logger.LogInformation("Iniciando sincronização manual de produtos do Tiny ERP para banco de dados...");
+            Console.WriteLine("Iniciando sincronização manual de produtos do Tiny ERP para banco de dados...");
 
-            // Regenera arquivo completo com todos os produtos
-            var sucesso = await _dataFileService.GenerateDataFileAsync();
+            var produtos = await _olistService.GetAllProductsAsync(null);
             
-            if (sucesso)
+            if (produtos == null || produtos.Count == 0)
             {
-                return Ok(new
-                {
-                    message = "Arquivo de dados Gertec atualizado com sucesso",
-                    filePath = _dataFileService.GetDataFilePath(),
-                    fileExists = _dataFileService.FileExists()
-                });
+                return BadRequest(new { message = "Nenhum produto encontrado na API" });
             }
+
+            var (processados, erros) = await _databaseService.UpsertProductsAsync(produtos);
             
-            return BadRequest(new { message = "Falha ao atualizar arquivo de dados Gertec" });
+            return Ok(new
+            {
+                message = "Produtos sincronizados com sucesso",
+                processados = processados,
+                erros = erros,
+                total = produtos.Count
+            });
         }
         catch (Exception ex)
         {
@@ -76,113 +76,6 @@ public class IntegrationController : ControllerBase
                 error = ex.Message
             });
         }
-    }
-
-    [HttpPost("gertec/datafile/generate")]
-    public async Task<IActionResult> GenerateDataFile()
-    {
-        try
-        {
-            _logger.LogInformation("Gerando arquivo de dados Gertec manualmente...");
-            var success = await _dataFileService.GenerateDataFileAsync();
-            
-            if (success)
-            {
-                return Ok(new
-                {
-                    message = "Arquivo de dados Gertec gerado com sucesso",
-                    filePath = _dataFileService.GetDataFilePath(),
-                    fileExists = _dataFileService.FileExists()
-                });
-            }
-            
-            return BadRequest(new { message = "Falha ao gerar arquivo de dados Gertec" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erro ao gerar arquivo de dados Gertec");
-            return StatusCode(500, new { message = "Erro ao gerar arquivo de dados", error = ex.Message });
-        }
-    }
-
-    [HttpGet("gertec/datafile/info")]
-    public IActionResult GetDataFileInfo()
-    {
-        try
-        {
-            return Ok(new
-            {
-                filePath = _dataFileService.GetDataFilePath(),
-                fileExists = _dataFileService.FileExists(),
-                fileSize = _dataFileService.FileExists() 
-                    ? new FileInfo(_dataFileService.GetDataFilePath()).Length 
-                    : 0
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erro ao obter informações do arquivo de dados");
-            return StatusCode(500, new { message = "Erro ao obter informações", error = ex.Message });
-        }
-    }
-
-    [HttpPost("gertec/datafile/test")]
-    public async Task<IActionResult> GenerateTestDataFile([FromQuery] int limit = 10)
-    {
-        try
-        {
-            _logger.LogInformation($"Gerando arquivo de dados Gertec para TESTE (limitando a {limit} produtos)...");
-            Console.WriteLine($"Gerando arquivo de dados Gertec para TESTE (limitando a {limit} produtos)...");
-            
-            var success = await _dataFileService.GenerateTestDataFileAsync(limit);
-            
-            if (success)
-            {
-                var fileInfo = new FileInfo(_dataFileService.GetDataFilePath());
-                var lineCount = 0;
-                if (fileInfo.Exists)
-                {
-                    lineCount = System.IO.File.ReadAllLines(_dataFileService.GetDataFilePath()).Length;
-                }
-                
-                return Ok(new
-                {
-                    message = $"Arquivo de dados Gertec gerado com sucesso para teste ({limit} produtos)",
-                    filePath = _dataFileService.GetDataFilePath(),
-                    fileExists = _dataFileService.FileExists(),
-                    fileSize = fileInfo.Exists ? fileInfo.Length : 0,
-                    lineCount = lineCount
-                });
-            }
-            
-            return BadRequest(new { message = "Falha ao gerar arquivo de dados Gertec para teste" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erro ao gerar arquivo de dados Gertec para teste");
-            return StatusCode(500, new { message = "Erro ao gerar arquivo de dados para teste", error = ex.Message });
-        }
-    }
-
-    private string FormatProductName(string nome)
-    {
-        // Formata para 4 linhas x 20 colunas (80 bytes total)
-        var linhas = new List<string>();
-        var nomeLimpo = nome.Replace("\n", " ").Replace("\r", "");
-
-        for (int i = 0; i < 4 && i * 20 < nomeLimpo.Length; i++)
-        {
-            var linha = nomeLimpo.Substring(i * 20, Math.Min(20, nomeLimpo.Length - i * 20));
-            linhas.Add(linha);
-        }
-
-        // Preenche até 4 linhas
-        while (linhas.Count < 4)
-        {
-            linhas.Add(new string(' ', 20));
-        }
-
-        return string.Join("", linhas);
     }
 }
 

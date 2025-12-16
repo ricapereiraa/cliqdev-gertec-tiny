@@ -13,18 +13,18 @@ public class ConfigController : ControllerBase
     private readonly ILogger<ConfigController> _logger;
     private readonly string _envPath;
     private readonly OlistApiService _olistService;
-    private readonly GertecDataFileService _dataFileService;
+    private readonly DatabaseService _databaseService;
 
     public ConfigController(
         IConfiguration configuration,
         ILogger<ConfigController> logger,
         OlistApiService olistService,
-        GertecDataFileService dataFileService)
+        DatabaseService databaseService)
     {
         _configuration = configuration;
         _logger = logger;
         _olistService = olistService;
-        _dataFileService = dataFileService;
+        _databaseService = databaseService;
         
         // Usa arquivo .env na raiz do projeto
         _envPath = Path.Combine(AppContext.BaseDirectory, ".env");
@@ -49,10 +49,11 @@ public class ConfigController : ControllerBase
                     token = MaskToken(_configuration["OlistApi:Token"]),
                     format = _configuration["OlistApi:Format"]
                 },
-                gertec = new
+                database = new
                 {
-                    dataFilePath = _dataFileService.GetDataFilePath(),
-                    dataFileExists = _dataFileService.FileExists()
+                    host = _configuration["Database:Host"],
+                    database = _configuration["Database:Database"],
+                    tableName = _configuration["Database:TableName"]
                 },
                 priceMonitoring = new
                 {
@@ -102,29 +103,34 @@ public class ConfigController : ControllerBase
         }
     }
 
-    [HttpPost("gertec/refresh")]
-    public async Task<IActionResult> RefreshDataFile()
+    [HttpPost("database/refresh")]
+    public async Task<IActionResult> RefreshDatabase()
     {
         try
         {
-            // Regenera arquivo de dados
-            var success = await _dataFileService.GenerateDataFileAsync();
+            _logger.LogInformation("Iniciando atualização manual do banco de dados...");
             
-            if (success)
+            var produtos = await _olistService.GetAllProductsAsync(null);
+            
+            if (produtos == null || produtos.Count == 0)
             {
-                return Ok(new 
-                { 
-                    message = "Arquivo de dados atualizado com sucesso",
-                    filePath = _dataFileService.GetDataFilePath(),
-                    fileExists = _dataFileService.FileExists()
-                });
+                return BadRequest(new { message = "Nenhum produto encontrado na API" });
             }
-            return BadRequest(new { message = "Falha ao atualizar arquivo de dados" });
+
+            var (processados, erros) = await _databaseService.UpsertProductsAsync(produtos);
+            
+            return Ok(new 
+            { 
+                message = "Banco de dados atualizado com sucesso",
+                processados = processados,
+                erros = erros,
+                total = produtos.Count
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao atualizar arquivo de dados");
-            return StatusCode(500, new { message = "Erro ao atualizar arquivo", error = ex.Message });
+            _logger.LogError(ex, "Erro ao atualizar banco de dados");
+            return StatusCode(500, new { message = "Erro ao atualizar banco de dados", error = ex.Message });
         }
     }
 
