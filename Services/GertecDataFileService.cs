@@ -254,28 +254,32 @@ public class GertecDataFileService
             _logger.LogInformation($"Produtos processados: {produtosProcessados} com GTIN, {produtosNovos} novos, {produtosAtualizados} atualizados, {produtosSemGtin} sem GTIN, {produtosComErro} com erro");
             Console.WriteLine($"Produtos processados: {produtosProcessados} com GTIN, {produtosNovos} novos, {produtosAtualizados} atualizados, {produtosSemGtin} sem GTIN, {produtosComErro} com erro");
 
-            // PASSO 5: Escreve todos os produtos no arquivo (sem duplicações)
+            // PASSO 5: APÓS PROCESSAR, REGISTRA TODOS OS PRODUTOS NO ARQUIVO (sem duplicações)
             var linhasFinais = produtosExistentes.Values.ToList();
             
-            _logger.LogInformation($"Total de produtos no dicionário antes de escrever: {produtosExistentes.Count}");
-            Console.WriteLine($"Total de produtos no dicionário antes de escrever: {produtosExistentes.Count}");
+            _logger.LogInformation($"Total de produtos no dicionário após processamento: {produtosExistentes.Count}");
+            Console.WriteLine($"Total de produtos no dicionário após processamento: {produtosExistentes.Count}");
+            Console.WriteLine($"Registrando {linhasFinais.Count} produtos no arquivo...");
             
             if (linhasFinais.Count > 0)
             {
-                _logger.LogInformation($"Atualizando arquivo com {linhasFinais.Count} produtos (sem duplicações)...");
-                Console.WriteLine($"Atualizando arquivo com {linhasFinais.Count} produtos (sem duplicações)...");
+                _logger.LogInformation($"Registrando {linhasFinais.Count} produtos no arquivo (sem duplicações)...");
+                Console.WriteLine($"Registrando {linhasFinais.Count} produtos no arquivo (sem duplicações)...");
                 
                 try
                 {
-                    // Escreve todos os produtos no arquivo
+                    // REGISTRA todos os produtos no arquivo APÓS processar
                     await File.WriteAllLinesAsync(_dataFilePath, linhasFinais, Encoding.UTF8);
+                    
+                    // Aguarda um pouco para garantir que o sistema de arquivos finalizou a escrita
+                    await Task.Delay(100);
                     
                     // Verifica se arquivo foi escrito corretamente
                     if (File.Exists(_dataFilePath))
                     {
                         var linhasEscritas = await File.ReadAllLinesAsync(_dataFilePath, Encoding.UTF8);
-                        _logger.LogInformation($"Arquivo escrito com sucesso! {linhasEscritas.Length} linhas no arquivo");
-                        Console.WriteLine($"✓ Arquivo escrito com sucesso! {linhasEscritas.Length} linhas no arquivo");
+                        _logger.LogInformation($"✓ Arquivo REGISTRADO com sucesso! {linhasEscritas.Length} linhas no arquivo");
+                        Console.WriteLine($"✓ Arquivo REGISTRADO com sucesso! {linhasEscritas.Length} linhas no arquivo");
                         
                         // Log das primeiras 3 linhas para debug
                         if (linhasEscritas.Length > 0)
@@ -288,26 +292,39 @@ public class GertecDataFileService
                                 Console.WriteLine($"  {linha}");
                             }
                         }
+                        
+                        // Confirma que o registro foi bem-sucedido
+                        _logger.LogInformation($"✓ REGISTRO CONCLUÍDO: {linhasEscritas.Length} produtos registrados no arquivo");
+                        Console.WriteLine($"✓ REGISTRO CONCLUÍDO: {linhasEscritas.Length} produtos registrados no arquivo");
                     }
                     else
                     {
-                        _logger.LogError("ERRO CRÍTICO: Arquivo não existe após escrita!");
-                        Console.WriteLine("✗ ERRO CRÍTICO: Arquivo não existe após escrita!");
+                        _logger.LogError("✗ ERRO CRÍTICO: Arquivo não existe após registro!");
+                        Console.WriteLine("✗ ERRO CRÍTICO: Arquivo não existe após registro!");
+                        return false;
                     }
                 }
                 catch (Exception writeEx)
                 {
-                    _logger.LogError(writeEx, $"ERRO ao escrever arquivo: {writeEx.Message}");
-                    Console.WriteLine($"✗ ERRO ao escrever arquivo: {writeEx.Message}");
-                    throw;
+                    _logger.LogError(writeEx, $"ERRO ao registrar produtos no arquivo: {writeEx.Message}");
+                    Console.WriteLine($"✗ ERRO ao registrar produtos no arquivo: {writeEx.Message}");
+                    return false;
                 }
             }
             else
             {
-                _logger.LogWarning($"Nenhum produto com GTIN encontrado para escrever. Total de produtos da API: {produtos.Count}, Produtos sem GTIN: {produtosSemGtin}");
-                Console.WriteLine($"⚠ ATENÇÃO: Nenhum produto com GTIN encontrado para escrever!");
+                _logger.LogWarning($"Nenhum produto com GTIN encontrado para registrar. Total de produtos da API: {produtos.Count}, Produtos sem GTIN: {produtosSemGtin}");
+                Console.WriteLine($"⚠ ATENÇÃO: Nenhum produto com GTIN encontrado para registrar!");
                 Console.WriteLine($"Total de produtos da API: {produtos.Count}");
                 Console.WriteLine($"Produtos sem GTIN: {produtosSemGtin}");
+                
+                // Mesmo sem produtos, garante que o arquivo existe (vazio)
+                if (!File.Exists(_dataFilePath))
+                {
+                    await File.WriteAllTextAsync(_dataFilePath, "", Encoding.UTF8);
+                    _logger.LogInformation("Arquivo vazio criado (nenhum produto para registrar)");
+                    Console.WriteLine("Arquivo vazio criado (nenhum produto para registrar)");
+                }
             }
 
             // Verifica se arquivo foi atualizado
@@ -551,28 +568,32 @@ public class GertecDataFileService
             _logger.LogInformation($"Produtos processados: {produtosProcessados} com GTIN, {produtosNovos} novos, {produtosAtualizados} atualizados, {produtosSemGtin} sem GTIN, {produtosComErro} com erro");
             Console.WriteLine($"Produtos processados: {produtosProcessados} com GTIN, {produtosNovos} novos, {produtosAtualizados} atualizados, {produtosSemGtin} sem GTIN, {produtosComErro} com erro");
 
-            // PASSO 5: Escreve todos os produtos no arquivo (sem duplicações)
+            // PASSO 5: APÓS PROCESSAR, REGISTRA TODOS OS PRODUTOS NO ARQUIVO (sem duplicações)
             var linhasFinais = produtosExistentes.Values.ToList();
             
-            _logger.LogInformation($"Total de produtos no dicionário antes de escrever: {produtosExistentes.Count}");
-            Console.WriteLine($"Total de produtos no dicionário antes de escrever: {produtosExistentes.Count}");
+            _logger.LogInformation($"Total de produtos no dicionário após processamento: {produtosExistentes.Count}");
+            Console.WriteLine($"Total de produtos no dicionário após processamento: {produtosExistentes.Count}");
+            Console.WriteLine($"Registrando {linhasFinais.Count} produtos no arquivo...");
             
             if (linhasFinais.Count > 0)
             {
-                _logger.LogInformation($"Atualizando arquivo com {linhasFinais.Count} produtos (sem duplicações)...");
-                Console.WriteLine($"Atualizando arquivo com {linhasFinais.Count} produtos (sem duplicações)...");
+                _logger.LogInformation($"Registrando {linhasFinais.Count} produtos no arquivo (sem duplicações)...");
+                Console.WriteLine($"Registrando {linhasFinais.Count} produtos no arquivo (sem duplicações)...");
                 
                 try
                 {
-                    // Escreve todos os produtos no arquivo
+                    // REGISTRA todos os produtos no arquivo APÓS processar
                     await File.WriteAllLinesAsync(_dataFilePath, linhasFinais, Encoding.UTF8);
+                    
+                    // Aguarda um pouco para garantir que o sistema de arquivos finalizou a escrita
+                    await Task.Delay(100);
                     
                     // Verifica se arquivo foi escrito corretamente
                     if (File.Exists(_dataFilePath))
                     {
                         var linhasEscritas = await File.ReadAllLinesAsync(_dataFilePath, Encoding.UTF8);
-                        _logger.LogInformation($"✓ Arquivo escrito com sucesso! {linhasEscritas.Length} linhas no arquivo");
-                        Console.WriteLine($"✓ Arquivo escrito com sucesso! {linhasEscritas.Length} linhas no arquivo");
+                        _logger.LogInformation($"✓ Arquivo REGISTRADO com sucesso! {linhasEscritas.Length} linhas no arquivo");
+                        Console.WriteLine($"✓ Arquivo REGISTRADO com sucesso! {linhasEscritas.Length} linhas no arquivo");
                         
                         // Log das primeiras 3 linhas para debug
                         if (linhasEscritas.Length > 0)
@@ -585,28 +606,41 @@ public class GertecDataFileService
                                 Console.WriteLine($"  {linha}");
                             }
                         }
+                        
+                        // Confirma que o registro foi bem-sucedido
+                        _logger.LogInformation($"✓ REGISTRO CONCLUÍDO: {linhasEscritas.Length} produtos registrados no arquivo");
+                        Console.WriteLine($"✓ REGISTRO CONCLUÍDO: {linhasEscritas.Length} produtos registrados no arquivo");
                     }
                     else
                     {
-                        _logger.LogError("✗ ERRO CRÍTICO: Arquivo não existe após escrita!");
-                        Console.WriteLine("✗ ERRO CRÍTICO: Arquivo não existe após escrita!");
+                        _logger.LogError("✗ ERRO CRÍTICO: Arquivo não existe após registro!");
+                        Console.WriteLine("✗ ERRO CRÍTICO: Arquivo não existe após registro!");
+                        return false;
                     }
                 }
                 catch (Exception writeEx)
                 {
-                    _logger.LogError(writeEx, $"ERRO ao escrever arquivo: {writeEx.Message}");
-                    Console.WriteLine($"ERRO ao escrever arquivo: {writeEx.Message}");
+                    _logger.LogError(writeEx, $"ERRO ao registrar produtos no arquivo: {writeEx.Message}");
+                    Console.WriteLine($"✗ ERRO ao registrar produtos no arquivo: {writeEx.Message}");
                     Console.WriteLine($"Stack trace: {writeEx.StackTrace}");
-                    throw; // Re-lança para ser capturado no catch externo
+                    return false;
                 }
             }
             else
             {
-                _logger.LogWarning($"Nenhum produto com GTIN encontrado para escrever. Total de produtos da API: {produtos.Count}, Produtos sem GTIN: {produtosSemGtin}");
-                Console.WriteLine($"ATENÇÃO: Nenhum produto com GTIN encontrado para escrever!");
+                _logger.LogWarning($"Nenhum produto com GTIN encontrado para registrar. Total de produtos da API: {produtos.Count}, Produtos sem GTIN: {produtosSemGtin}");
+                Console.WriteLine($"⚠ ATENÇÃO: Nenhum produto com GTIN encontrado para registrar!");
                 Console.WriteLine($"Total de produtos da API: {produtos.Count}");
                 Console.WriteLine($"Produtos sem GTIN: {produtosSemGtin}");
                 Console.WriteLine($"Produtos processados: {produtosProcessados}");
+                
+                // Mesmo sem produtos, garante que o arquivo existe (vazio)
+                if (!File.Exists(_dataFilePath))
+                {
+                    await File.WriteAllTextAsync(_dataFilePath, "", Encoding.UTF8);
+                    _logger.LogInformation("Arquivo vazio criado (nenhum produto para registrar)");
+                    Console.WriteLine("Arquivo vazio criado (nenhum produto para registrar)");
+                }
             }
 
             // Verifica se arquivo foi atualizado
