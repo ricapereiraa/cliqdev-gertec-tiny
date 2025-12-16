@@ -9,6 +9,7 @@ public class IntegrationService : BackgroundService
     private readonly GertecProtocolService _gertecService;
     private readonly OlistApiService _olistService;
     private readonly GertecDataFileService _dataFileService;
+    private readonly GertecProductCacheService _productCacheService;
     private readonly IConfiguration _configuration;
     private DateTime? _lastSyncDate;
     private readonly Dictionary<string, Produto> _productCache = new();
@@ -18,12 +19,14 @@ public class IntegrationService : BackgroundService
         GertecProtocolService gertecService,
         OlistApiService olistService,
         GertecDataFileService dataFileService,
+        GertecProductCacheService productCacheService,
         IConfiguration configuration)
     {
         _logger = logger;
         _gertecService = gertecService;
         _olistService = olistService;
         _dataFileService = dataFileService;
+        _productCacheService = productCacheService;
         _configuration = configuration;
     }
 
@@ -55,35 +58,47 @@ public class IntegrationService : BackgroundService
             _logger.LogError(ex, "Erro ao gerar arquivo de dados inicial. Continuando...");
         }
 
-        // Conecta ao servidor Gertec
-        _logger.LogInformation("Conectando ao servidor Gertec...");
-        Console.WriteLine("Conectando ao servidor Gertec...");
-        var connected = await _gertecService.ConnectAsync();
-        if (connected)
+        // Carrega produtos do arquivo TXT no cache
+        _logger.LogInformation("Carregando produtos do arquivo TXT...");
+        Console.WriteLine("Carregando produtos do arquivo TXT...");
+        try
         {
-            _logger.LogInformation("Conexão estabelecida com servidor Gertec");
-            Console.WriteLine("Conexão estabelecida com servidor Gertec");
+            await _productCacheService.LoadProductsFromFileAsync();
+            var count = _productCacheService.GetProductCount();
+            _logger.LogInformation($"Produtos carregados no cache: {count} produtos");
+            Console.WriteLine($"Produtos carregados no cache: {count} produtos");
         }
-        else
+        catch (Exception ex)
         {
-            _logger.LogWarning("Falha ao conectar ao servidor Gertec. Tentando novamente em 5 segundos...");
-            Console.WriteLine("Falha ao conectar ao servidor Gertec. Tentando novamente em 5 segundos...");
+            _logger.LogError(ex, "Erro ao carregar produtos do arquivo. Continuando...");
         }
 
+        // Inicia servidor TCP para escutar conexões do Gertec
+        _logger.LogInformation("Iniciando servidor TCP para escutar conexões do Gertec...");
+        Console.WriteLine("Iniciando servidor TCP para escutar conexões do Gertec...");
+        await _gertecService.ConnectAsync();
+
         // Inicia monitoramento de preços se habilitado
+        // Atualiza arquivo TXT e recarrega cache quando detecta mudanças
         var monitoringEnabled = _configuration.GetValue<bool>("PriceMonitoring:Enabled");
         if (monitoringEnabled)
         {
+            _logger.LogInformation("Monitoramento de preços habilitado - atualizando arquivo TXT automaticamente");
+            Console.WriteLine("Monitoramento de preços habilitado - atualizando arquivo TXT automaticamente");
             _ = Task.Run(() => MonitorPriceChangesAsync(stoppingToken), stoppingToken);
         }
 
-        // Mantém o serviço rodando e reconecta se necessário
+        // Mantém o serviço rodando e recarrega produtos periodicamente
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (!_gertecService.IsConnected)
+            // Recarrega produtos do arquivo se foi modificado
+            try
             {
-                _logger.LogWarning("Conexão perdida com servidor Gertec. Tentando reconectar...");
-                await _gertecService.ReconnectAsync();
+                await _productCacheService.RefreshIfNeededAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Erro ao recarregar produtos do arquivo");
             }
             
             await Task.Delay(5000, stoppingToken);
@@ -145,13 +160,14 @@ public class IntegrationService : BackgroundService
 
                 foreach (var produto in produtos)
                 {
-                    // Usa código ou GTIN como chave
-                    var chaveProduto = !string.IsNullOrEmpty(produto.Codigo) 
-                        ? produto.Codigo 
-                        : produto.Gtin;
+                    // USA APENAS GTIN como chave (nunca código/SKU)
+                    var chaveProduto = produto.Gtin;
                     
                     if (string.IsNullOrEmpty(chaveProduto))
+                    {
+                        // Ignora produtos sem GTIN
                         continue;
+                    }
 
                     // Verifica se o preço mudou ou se é um novo produto
                     if (_productCache.TryGetValue(chaveProduto, out var produtoCache))
@@ -172,89 +188,40 @@ public class IntegrationService : BackgroundService
                             try
                             {
                                 await _dataFileService.UpdateProductInFileAsync(produto);
+                                _logger.LogInformation($"Produto atualizado no arquivo: {produto.Nome} - GTIN: {chaveProduto}");
+                                Console.WriteLine($"Produto atualizado no arquivo: {produto.Nome} - GTIN: {chaveProduto}");
+                                produtosAtualizados++;
                             }
                             catch (Exception fileEx)
                             {
                                 _logger.LogWarning(fileEx, $"Erro ao atualizar produto no arquivo de dados: {produto.Nome}");
                             }
-                            
-                            // Envia informações atualizadas para o Gertec
-                            if (_gertecService.IsConnected)
-                            {
-                                try
-                                {
-                                    var nomeFormatado = FormatProductName(produto.Nome);
-                                    
-                                    // Usa preço promocional se disponível e maior que zero, senão usa preço normal
-                                    var preco = !string.IsNullOrEmpty(produto.PrecoPromocional) && 
-                                               decimal.TryParse(produto.PrecoPromocional, out var precoPromo) && 
-                                               precoPromo > 0
-                                        ? produto.PrecoPromocional 
-                                        : produto.Preco;
-                                    
-                                    var precoFormatado = _olistService.FormatPrice(preco);
-                                    
-                                    // Envia imagem do produto se disponível (antes de enviar nome e preço)
-                                    if (!string.IsNullOrEmpty(produto.Imagem) || !string.IsNullOrEmpty(produto.ImagemPrincipal))
-                                    {
-                                        try
-                                        {
-                                            var imagemUrl = produto.ImagemPrincipal ?? produto.Imagem;
-                                            if (!string.IsNullOrEmpty(imagemUrl))
-                                            {
-                                                _logger.LogInformation($"Enviando imagem do produto atualizado: {imagemUrl}");
-                                                Console.WriteLine($"Enviando imagem do produto: {produto.Nome}");
-                                                var imagemEnviada = await _gertecService.SendImageFromFileAsync(imagemUrl, indice: 0, numeroLoops: 1, tempoExibicao: 5);
-                                                if (imagemEnviada)
-                                                {
-                                                    Console.WriteLine($"Imagem enviada com sucesso para servidor Gertec: {produto.Nome}");
-                                                }
-                                            }
-                                        }
-                                        catch (Exception imgEx)
-                                        {
-                                            _logger.LogWarning(imgEx, $"Erro ao enviar imagem do produto {produto.Nome}. Continuando com nome e preço...");
-                                        }
-                                    }
-                                    
-                                    // Envia produto atualizado para o Gertec
-                                    bool enviado = await _gertecService.SendProductInfoAsync(nomeFormatado, precoFormatado);
-                                    
-                                    if (enviado)
-                                    {
-                                        _logger.LogInformation($"ENVIADO para servidor Gertec com sucesso: {produto.Nome} - Preço: {precoFormatado}");
-                                        Console.WriteLine($"ENVIADO para servidor Gertec com sucesso: {produto.Nome} - Preço: {precoFormatado}");
-                                        produtosAtualizados++;
-                                    }
-                                    else
-                                    {
-                                        _logger.LogWarning($"Falha ao enviar produto {produto.Nome} para o Gertec");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogError(ex, $"Erro ao enviar produto {produto.Nome} para o Gertec");
-                                }
-                            }
-                            else
-                            {
-                                _logger.LogWarning($"Gertec não conectado. Produto {produto.Nome} não foi atualizado");
-                            }
                         }
                     }
                     else
                     {
-                        // Novo produto - adiciona ao cache
+                        // Novo produto - adiciona ao cache e atualiza arquivo
                         _productCache[chaveProduto] = produto;
                         produtosNovos++;
                         
+                        // Atualiza arquivo TXT para novo produto
+                        try
+                        {
+                            await _dataFileService.UpdateProductInFileAsync(produto);
+                        }
+                        catch (Exception fileEx)
+                        {
+                            _logger.LogWarning(fileEx, $"Erro ao adicionar novo produto no arquivo: {produto.Nome}");
+                        }
+                        
                         if (primeiraExecucao)
                         {
-                            _logger.LogDebug($"Novo produto adicionado ao cache: {produto.Nome} (Código: {chaveProduto})");
+                            _logger.LogDebug($"Novo produto adicionado: {produto.Nome} (GTIN: {chaveProduto})");
                         }
                         else
                         {
-                            _logger.LogInformation($"Novo produto detectado: {produto.Nome} (Código: {chaveProduto})");
+                            _logger.LogInformation($"Novo produto detectado: {produto.Nome} (GTIN: {chaveProduto})");
+                            Console.WriteLine($"Novo produto detectado: {produto.Nome} (GTIN: {chaveProduto})");
                         }
                     }
                 }
@@ -275,14 +242,20 @@ public class IntegrationService : BackgroundService
                         _logger.LogError(ex, "Erro ao atualizar cache do OlistApiService");
                     }
 
-                    // Regenera arquivo TXT completo quando há mudanças significativas
-                    if (produtosAtualizados > 0 || produtosNovos > 10)
+                    // Regenera arquivo TXT completo quando há mudanças significativas ou na primeira execução
+                    if (primeiraExecucao || produtosAtualizados > 0 || produtosNovos > 10)
                     {
-                        _logger.LogInformation("Regenerando arquivo de dados Gertec devido a mudanças...");
-                        Console.WriteLine("Regenerando arquivo de dados Gertec devido a mudanças...");
+                        _logger.LogInformation("Regenerando arquivo de dados Gertec com todos os produtos...");
+                        Console.WriteLine("Regenerando arquivo de dados Gertec com todos os produtos...");
                         try
                         {
                             await _dataFileService.GenerateDataFileAsync();
+                            
+                            // Recarrega produtos do arquivo atualizado
+                            await _productCacheService.LoadProductsFromFileAsync();
+                            var count = _productCacheService.GetProductCount();
+                            _logger.LogInformation($"Produtos recarregados do arquivo: {count} produtos");
+                            Console.WriteLine($"Produtos recarregados do arquivo: {count} produtos");
                         }
                         catch (Exception fileEx)
                         {

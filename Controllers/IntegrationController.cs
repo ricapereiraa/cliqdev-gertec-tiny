@@ -123,115 +123,29 @@ public class IntegrationController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("Iniciando sincronização manual de preços do Tiny ERP...");
+            _logger.LogInformation("Iniciando sincronização manual de produtos do Tiny ERP para arquivo...");
+            Console.WriteLine("Iniciando sincronização manual de produtos do Tiny ERP para arquivo...");
 
-            if (!_gertecService.IsConnected)
-            {
-                _logger.LogWarning("Gertec não conectado. Tentando conectar...");
-                var connected = await _gertecService.ConnectAsync();
-                if (!connected)
-                {
-                    return BadRequest(new { 
-                        message = "Não foi possível conectar ao Gertec. Verifique a conexão de rede.",
-                        gertecConnected = false
-                    });
-                }
-            }
-
-            // Busca todos os produtos do Tiny ERP
-            var produtos = await _olistService.GetAllProductsAsync(null);
+            // Regenera arquivo completo com todos os produtos
+            var sucesso = await _dataFileService.GenerateDataFileAsync();
             
-            if (produtos == null || produtos.Count == 0)
+            if (sucesso)
             {
-                return Ok(new { 
-                    message = "Nenhum produto encontrado no Tiny ERP",
-                    produtosSincronizados = 0
+                return Ok(new
+                {
+                    message = "Arquivo de dados Gertec atualizado com sucesso",
+                    filePath = _dataFileService.GetDataFilePath(),
+                    fileExists = _dataFileService.FileExists()
                 });
             }
-
-            int produtosEnviados = 0;
-            int produtosComErro = 0;
-            var erros = new List<string>();
-
-            foreach (var produto in produtos)
-            {
-                // Usa código ou GTIN como chave
-                var chaveProduto = !string.IsNullOrEmpty(produto.Codigo) 
-                    ? produto.Codigo 
-                    : produto.Gtin;
-                
-                if (string.IsNullOrEmpty(chaveProduto))
-                    continue;
-
-                try
-                {
-                    // Formata nome para 4 linhas x 20 colunas (80 bytes)
-                    var nomeFormatado = FormatProductName(produto.Nome);
-                    
-                    // Usa preço promocional se disponível e maior que zero, senão usa preço normal
-                    var preco = !string.IsNullOrEmpty(produto.PrecoPromocional) && 
-                               decimal.TryParse(produto.PrecoPromocional, out var precoPromo) && 
-                               precoPromo > 0
-                        ? produto.PrecoPromocional 
-                        : produto.Preco;
-                    
-                    var precoFormatado = _olistService.FormatPrice(preco);
-
-                    // Envia imagem do produto se disponível (antes de enviar nome e preço)
-                    if (!string.IsNullOrEmpty(produto.Imagem) || !string.IsNullOrEmpty(produto.ImagemPrincipal))
-                    {
-                        try
-                        {
-                            var imagemUrl = produto.ImagemPrincipal ?? produto.Imagem;
-                            if (!string.IsNullOrEmpty(imagemUrl))
-                            {
-                                _logger.LogInformation($"Enviando imagem do produto: {imagemUrl}");
-                                await _gertecService.SendImageFromFileAsync(imagemUrl, indice: 0, numeroLoops: 1, tempoExibicao: 5);
-                            }
-                        }
-                        catch (Exception imgEx)
-                        {
-                            _logger.LogWarning(imgEx, $"Erro ao enviar imagem do produto {produto.Nome}. Continuando com nome e preço...");
-                        }
-                    }
-
-                    // Envia para o Gertec
-                    bool enviado = await _gertecService.SendProductInfoAsync(nomeFormatado, precoFormatado);
-                    
-                    if (enviado)
-                    {
-                        produtosEnviados++;
-                    }
-                    else
-                    {
-                        produtosComErro++;
-                        erros.Add($"Falha ao enviar produto {produto.Nome} (Código: {chaveProduto})");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    produtosComErro++;
-                    erros.Add($"Erro ao processar produto {produto.Nome} (Código: {chaveProduto}): {ex.Message}");
-                    _logger.LogError(ex, $"Erro ao sincronizar produto {produto.Nome}");
-                }
-            }
-
-            _logger.LogInformation($"Sincronização concluída: {produtosEnviados} produtos enviados, {produtosComErro} com erro");
-
-            return Ok(new
-            {
-                message = "Sincronização concluída",
-                totalProdutos = produtos.Count,
-                produtosEnviados,
-                produtosComErro,
-                erros = erros.Take(10).ToList() // Limita a 10 erros na resposta
-            });
+            
+            return BadRequest(new { message = "Falha ao atualizar arquivo de dados Gertec" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro na sincronização manual de preços");
+            _logger.LogError(ex, "Erro na sincronização manual de produtos");
             return StatusCode(500, new { 
-                message = "Erro ao sincronizar preços",
+                message = "Erro ao sincronizar produtos",
                 error = ex.Message
             });
         }

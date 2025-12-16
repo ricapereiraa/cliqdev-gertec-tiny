@@ -40,7 +40,8 @@ public class GertecDataFileService
 
     /// <summary>
     /// Gera ou atualiza o arquivo TXT com todos os produtos do Tiny ERP
-    /// Formato: CODIGO|NOME|PRECO|IMAGEM
+    /// Formato: GTIN|NOME|PRECO|IMAGEM
+    /// IMPORTANTE: Usa apenas GTIN (código de barras), nunca SKU/código interno
     /// </summary>
     public async Task<bool> GenerateDataFileAsync()
     {
@@ -67,14 +68,13 @@ public class GertecDataFileService
             {
                 try
                 {
-                    // Usa código ou GTIN como identificador
-                    var codigo = !string.IsNullOrEmpty(produto.Codigo) 
-                        ? produto.Codigo 
-                        : produto.Gtin;
+                    // USA APENAS GTIN (nunca código/SKU)
+                    var gtin = produto.Gtin;
 
-                    if (string.IsNullOrEmpty(codigo))
+                    if (string.IsNullOrEmpty(gtin))
                     {
                         produtosComErro++;
+                        _logger.LogDebug($"Produto {produto.Nome} ignorado: sem GTIN (código de barras)");
                         continue;
                     }
 
@@ -102,8 +102,8 @@ public class GertecDataFileService
                     // Caminho da imagem (URL ou caminho local)
                     var imagem = produto.ImagemPrincipal ?? produto.Imagem ?? "";
 
-                    // Formato: CODIGO|NOME|PRECO|IMAGEM
-                    var linha = $"{codigo}|{nome}|{precoFormatado}|{imagem}";
+                    // Formato: GTIN|NOME|PRECO|IMAGEM (GTIN = código de barras, nunca SKU)
+                    var linha = $"{gtin}|{nome}|{precoFormatado}|{imagem}";
                     linhas.Add(linha);
                     produtosProcessados++;
                 }
@@ -152,10 +152,13 @@ public class GertecDataFileService
             }
 
             var linhas = (await File.ReadAllLinesAsync(_dataFilePath)).ToList();
-            var codigo = !string.IsNullOrEmpty(produto.Codigo) ? produto.Codigo : produto.Gtin;
+            
+            // USA APENAS GTIN (nunca código/SKU)
+            var gtin = produto.Gtin;
 
-            if (string.IsNullOrEmpty(codigo))
+            if (string.IsNullOrEmpty(gtin))
             {
+                _logger.LogDebug($"Produto {produto.Nome} ignorado: sem GTIN (código de barras)");
                 return false;
             }
 
@@ -179,13 +182,13 @@ public class GertecDataFileService
                 .Trim();
 
             var imagem = produto.ImagemPrincipal ?? produto.Imagem ?? "";
-            var novaLinha = $"{codigo}|{nome}|{precoFormatado}|{imagem}";
+            var novaLinha = $"{gtin}|{nome}|{precoFormatado}|{imagem}";
 
             // Procura linha existente e atualiza, ou adiciona nova
             bool encontrado = false;
             for (int i = 0; i < linhas.Count; i++)
             {
-                if (linhas[i].StartsWith($"{codigo}|"))
+                if (linhas[i].StartsWith($"{gtin}|"))
                 {
                     linhas[i] = novaLinha;
                     encontrado = true;

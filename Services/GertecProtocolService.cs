@@ -9,110 +9,177 @@ public class GertecProtocolService : IDisposable
 {
     private readonly ILogger<GertecProtocolService> _logger;
     private readonly GertecConfig _config;
+    private readonly GertecProductCacheService _productCache;
+    private TcpListener? _tcpListener;
     private TcpClient? _tcpClient;
     private NetworkStream? _stream;
     private bool _isConnected = false;
+    private bool _isListening = false;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
+    private CancellationTokenSource? _listenerCancellationToken;
 
+    public event EventHandler<string>? BarcodeReceived;
     public bool IsConnected => _isConnected && _tcpClient?.Connected == true;
 
-    public GertecProtocolService(ILogger<GertecProtocolService> logger, GertecConfig config)
+    public GertecProtocolService(
+        ILogger<GertecProtocolService> logger, 
+        GertecConfig config,
+        GertecProductCacheService productCache)
     {
         _logger = logger;
         _config = config;
+        _productCache = productCache;
     }
 
     /// <summary>
-    /// Conecta ao servidor do Gertec como cliente TCP
+    /// Inicia o servidor TCP para escutar conexões do Gertec
     /// </summary>
     public async Task<bool> ConnectAsync()
+    {
+        return await StartListeningAsync();
+    }
+
+    /// <summary>
+    /// Inicia o servidor TCP na porta configurada
+    /// </summary>
+    public async Task<bool> StartListeningAsync()
     {
         await _connectionLock.WaitAsync();
         try
         {
-            if (IsConnected)
+            if (_isListening)
             {
-                _logger.LogInformation("Já conectado ao servidor Gertec");
+                _logger.LogInformation("Servidor já está escutando");
                 return true;
             }
 
-            // Valida IP e porta
-            if (string.IsNullOrWhiteSpace(_config.IpAddress))
-            {
-                _logger.LogError("IP do servidor Gertec não configurado");
-                return false;
-            }
+            int portToUse = _config.Port;
+            
+            // Escuta em todas as interfaces (0.0.0.0)
+            System.Net.IPAddress listenAddress = System.Net.IPAddress.Any;
 
-            if (!System.Net.IPAddress.TryParse(_config.IpAddress, out _))
-            {
-                _logger.LogError($"IP inválido: {_config.IpAddress}");
-                return false;
-            }
+            _tcpListener = new TcpListener(listenAddress, portToUse);
+            _tcpListener.Start();
 
-            // Fecha conexão anterior se existir
-            await DisconnectAsync();
+            _isListening = true;
+            _listenerCancellationToken = new CancellationTokenSource();
 
-            _logger.LogInformation($"Conectando ao servidor Gertec em {_config.IpAddress}:{_config.Port}...");
+            _logger.LogInformation($"Servidor TCP iniciado - Escutando em {listenAddress}:{portToUse}");
+            Console.WriteLine($"Servidor TCP iniciado - Escutando em {listenAddress}:{portToUse}");
+            _logger.LogInformation($"Aguardando conexão do Gertec na porta {portToUse}...");
+            Console.WriteLine($"Aguardando conexão do Gertec na porta {portToUse}...");
 
+            // Inicia thread para aceitar conexões
+            _ = Task.Run(() => AcceptConnectionsAsync(_listenerCancellationToken.Token));
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Erro ao iniciar servidor TCP na porta {_config.Port}");
+            _isListening = false;
+            return false;
+        }
+        finally
+        {
+            _connectionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Aceita conexões do Gertec
+    /// </summary>
+    private async Task AcceptConnectionsAsync(CancellationToken cancellationToken)
+    {
+        while (_isListening && !cancellationToken.IsCancellationRequested)
+        {
             try
             {
-                _tcpClient = new TcpClient();
-                _tcpClient.ReceiveTimeout = 30000; // 30 segundos
-                _tcpClient.SendTimeout = 30000; // 30 segundos
+                if (_tcpListener == null)
+                {
+                    await Task.Delay(1000, cancellationToken);
+                    continue;
+                }
 
-                // Habilita keep-alive TCP
-                _tcpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-
-                // Conecta ao servidor com timeout
-                var connectTask = _tcpClient.ConnectAsync(_config.IpAddress, _config.Port);
-                var timeoutTask = Task.Delay(_config.ConnectionTimeoutMilliseconds);
-
-                var completed = await Task.WhenAny(connectTask, timeoutTask);
+                _logger.LogInformation("Servidor TCP aguardando conexão do Gertec...");
                 
-                if (completed == timeoutTask)
+                // Aceita conexão do Gertec
+                var client = await _tcpListener.AcceptTcpClientAsync();
+                
+                var clientEndPoint = client.Client.RemoteEndPoint;
+                _logger.LogInformation($"CONEXAO ESTABELECIDA! Gertec se conectou ao servidor!");
+                Console.WriteLine($"CONEXAO ESTABELECIDA! Gertec se conectou ao servidor!");
+                _logger.LogInformation($"   IP do Gertec: {clientEndPoint}");
+                Console.WriteLine($"   IP do Gertec: {clientEndPoint}");
+                _logger.LogInformation($"   Servidor escutando na porta: {_config.Port}");
+                Console.WriteLine($"   Servidor escutando na porta: {_config.Port}");
+                
+                // Se já há uma conexão ativa, fecha a anterior
+                if (_tcpClient != null && _tcpClient.Connected)
                 {
-                    _logger.LogError($"Timeout ao conectar ao servidor Gertec {_config.IpAddress}:{_config.Port}");
+                    var oldEndPoint = _tcpClient.Client.RemoteEndPoint;
+                    _logger.LogWarning($"Nova conexao recebida de {clientEndPoint}, fechando conexao anterior {oldEndPoint}...");
+                    await Task.Delay(100);
                     _tcpClient?.Close();
                     _tcpClient?.Dispose();
-                    _tcpClient = null;
-                    return false;
                 }
 
-                if (!_tcpClient.Connected)
-                {
-                    _logger.LogError($"Falha ao conectar ao servidor Gertec {_config.IpAddress}:{_config.Port}");
-                    _tcpClient?.Close();
-                    _tcpClient?.Dispose();
-                    _tcpClient = null;
-                    return false;
-                }
-
+                _tcpClient = client;
+                _tcpClient.ReceiveTimeout = System.Threading.Timeout.Infinite;
+                _tcpClient.SendTimeout = 30000;
+                _tcpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                
                 _stream = _tcpClient.GetStream();
-                _stream.ReadTimeout = 30000;
+                _stream.ReadTimeout = System.Threading.Timeout.Infinite;
                 _stream.WriteTimeout = 30000;
-
+                
                 _isConnected = true;
-
-                _logger.LogInformation($"CONECTADO ao servidor Gertec em {_config.IpAddress}:{_config.Port}");
-                Console.WriteLine($"CONECTADO ao servidor Gertec em {_config.IpAddress}:{_config.Port}");
-                return true;
+                
+                _logger.LogInformation($"Conexao TCP estabelecida e ativa!");
+                Console.WriteLine($"Conexao TCP estabelecida e ativa!");
+                _logger.LogInformation($"   Aguardando codigos de barras do Gertec...");
+                Console.WriteLine($"   Aguardando codigos de barras do Gertec...");
+                
+                // Inicia thread de leitura de mensagens
+                _ = Task.Run(() => ListenForMessagesAsync());
             }
-            catch (SocketException ex)
+            catch (ObjectDisposedException)
             {
-                _logger.LogError(ex, $"Erro de socket ao conectar ao servidor Gertec: {ex.Message}");
-                _tcpClient?.Close();
-                _tcpClient?.Dispose();
-                _tcpClient = null;
-                return false;
+                break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Erro ao conectar ao servidor Gertec: {ex.Message}");
-                _tcpClient?.Close();
-                _tcpClient?.Dispose();
-                _tcpClient = null;
-                return false;
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "Erro ao aceitar conexão do Gertec");
+                    await Task.Delay(1000, cancellationToken);
+                }
             }
+        }
+    }
+
+    /// <summary>
+    /// Para o servidor TCP
+    /// </summary>
+    public async Task StopListeningAsync()
+    {
+        await _connectionLock.WaitAsync();
+        try
+        {
+            _isListening = false;
+            _listenerCancellationToken?.Cancel();
+            
+            _tcpListener?.Stop();
+            _tcpListener = null;
+            
+            await DisconnectAsync();
+            
+            _logger.LogInformation("Servidor TCP parado");
+            Console.WriteLine("Servidor TCP parado");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao parar servidor TCP");
         }
         finally
         {
@@ -132,11 +199,11 @@ public class GertecProtocolService : IDisposable
             _tcpClient?.Dispose();
             _tcpClient = null;
             _stream = null;
-            _logger.LogInformation("Desconectado do servidor Gertec");
+            _logger.LogInformation("Conexão com Gertec fechada");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao desconectar do servidor Gertec");
+            _logger.LogError(ex, "Erro ao desconectar do Gertec");
         }
         finally
         {
@@ -144,32 +211,212 @@ public class GertecProtocolService : IDisposable
         }
     }
 
-    /// <summary>
-    /// Reconecta ao servidor Gertec
-    /// </summary>
-    public async Task<bool> ReconnectAsync()
+    private async Task ListenForMessagesAsync()
     {
-        _logger.LogInformation("Reconectando ao servidor Gertec...");
-        Console.WriteLine("Reconectando ao servidor Gertec...");
-        await DisconnectAsync();
-        await Task.Delay(1000);
-        var connected = await ConnectAsync();
-        if (connected)
+        var buffer = new byte[255];
+        
+        _logger.LogInformation("Thread de leitura de mensagens iniciada. Mantendo conexão aberta...");
+        
+        while (_isConnected && _tcpClient?.Connected == true)
         {
-            Console.WriteLine("Reconectado ao servidor Gertec com sucesso");
+            try
+            {
+                if (_stream == null)
+                {
+                    await Task.Delay(100);
+                    continue;
+                }
+
+                // Verifica se há dados disponíveis antes de ler
+                if (!_stream.DataAvailable)
+                {
+                    await Task.Delay(100);
+                    continue;
+                }
+
+                // Lê dados disponíveis
+                int bytesRead = 0;
+                try
+                {
+                    bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
+                }
+                catch (IOException ioEx) when (ioEx.InnerException is SocketException socketEx)
+                {
+                    if (socketEx.SocketErrorCode == SocketError.ConnectionReset || 
+                        socketEx.SocketErrorCode == SocketError.ConnectionAborted)
+                    {
+                        _logger.LogWarning($"Conexão com Gertec foi fechada pelo cliente. Código: {socketEx.SocketErrorCode}");
+                        _isConnected = false;
+                        break;
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Erro temporário ao ler do Gertec: {socketEx.SocketErrorCode}. Continuando...");
+                        await Task.Delay(1000);
+                        continue;
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                    _logger.LogInformation("Stream foi fechado. Encerrando leitura de mensagens.");
+                    _isConnected = false;
+                    break;
+                }
+
+                if (bytesRead == 0)
+                {
+                    _logger.LogInformation("Conexão fechada pelo Gertec (bytesRead == 0).");
+                    _isConnected = false;
+                    break;
+                }
+                
+                if (bytesRead > 0)
+                {
+                    string message = Encoding.ASCII.GetString(buffer, 0, bytesRead);
+                    
+                    _logger.LogInformation($"Mensagem recebida do Gertec ({bytesRead} bytes): [{message.TrimEnd('\0', '\r', '\n')}]");
+                    Console.WriteLine($"Mensagem recebida do Gertec: [{message.TrimEnd('\0', '\r', '\n')}]");
+
+                    // Processa código de barras (#codigo)
+                    // Conforme manual: terminal envia #123456 quando lê código de barras
+                    if (message.StartsWith("#") && message.Length > 1 && !message.StartsWith("#macaddr") && 
+                        !message.StartsWith("#gif") && !message.StartsWith("#mesg") && 
+                        !message.StartsWith("#rupdconfig") && !message.StartsWith("#playaudio") &&
+                        !message.StartsWith("#fullmacaddr") && !message.StartsWith("#audioconfig") &&
+                        !message.StartsWith("#raudioconfig") && !message.StartsWith("#nfound") &&
+                        !message.StartsWith("#gif_ok") && !message.StartsWith("#rupdconfig_ok") &&
+                        !message.StartsWith("#playaudiowithmessage_ok") && !message.StartsWith("#playaudiowithmessage_error"))
+                    {
+                        // Remove o # inicial e limpa caracteres nulos e espaços
+                        string barcode = message.Substring(1).TrimEnd('\0', '\r', '\n', ' ').Trim();
+                        
+                        if (!string.IsNullOrWhiteSpace(barcode))
+                        {
+                            _logger.LogInformation($"Código de barras recebido do Gertec: {barcode}");
+                            Console.WriteLine($"Código de barras recebido: {barcode}");
+                            
+                            // Processa código de barras de forma assíncrona
+                            _ = Task.Run(async () => await ProcessBarcodeAsync(barcode));
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogDebug($"Mensagem recebida mas não processada: {message.TrimEnd('\0', '\r', '\n')}");
+                    }
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                _logger.LogInformation("Stream foi fechado. Encerrando leitura de mensagens.");
+                _isConnected = false;
+                break;
+            }
+            catch (Exception ex)
+            {
+                if (_isConnected && _tcpClient?.Connected == true)
+                {
+                    _logger.LogError(ex, "Erro ao ler mensagem do Gertec. Tentando continuar...");
+                    await Task.Delay(1000);
+                }
+                else
+                {
+                    _logger.LogInformation("Conexão perdida. Encerrando leitura de mensagens.");
+                    _isConnected = false;
+                    break;
+                }
+            }
         }
-        return connected;
+        
+        _logger.LogInformation("Thread de leitura de mensagens encerrada. Aguardando nova conexão...");
+    }
+
+    /// <summary>
+    /// Processa código de barras recebido: busca no arquivo e envia resposta
+    /// </summary>
+    private async Task ProcessBarcodeAsync(string barcode)
+    {
+        try
+        {
+            // Recarrega produtos se arquivo foi modificado
+            await _productCache.RefreshIfNeededAsync();
+
+            // Busca produto no cache (arquivo TXT)
+            var produto = _productCache.GetProductByGtin(barcode);
+
+            if (produto != null)
+            {
+                _logger.LogInformation($"Produto encontrado: {produto.Nome} - Preço: {produto.Preco}");
+                Console.WriteLine($"Produto encontrado: {produto.Nome} - Preço: {produto.Preco}");
+
+                // Envia imagem se disponível (antes de enviar nome e preço)
+                if (!string.IsNullOrEmpty(produto.Imagem))
+                {
+                    try
+                    {
+                        _logger.LogInformation($"Enviando imagem do produto: {produto.Imagem}");
+                        Console.WriteLine($"Enviando imagem do produto: {produto.Nome}");
+                        var imagemEnviada = await SendImageFromFileAsync(produto.Imagem, indice: 0, numeroLoops: 1, tempoExibicao: 5);
+                        if (imagemEnviada)
+                        {
+                            Console.WriteLine($"Imagem enviada com sucesso: {produto.Nome}");
+                        }
+                    }
+                    catch (Exception imgEx)
+                    {
+                        _logger.LogWarning(imgEx, $"Erro ao enviar imagem do produto {produto.Nome}. Continuando com nome e preço...");
+                    }
+                }
+
+                // Formata nome para 4 linhas x 20 colunas (80 bytes)
+                var nomeFormatado = FormatProductName(produto.Nome);
+                
+                // Envia nome e preço para o Gertec
+                await SendProductInfoAsync(nomeFormatado, produto.Preco);
+                
+                _logger.LogInformation($"ENVIADO para Gertec: {produto.Nome} - {produto.Preco}");
+                Console.WriteLine($"ENVIADO para Gertec: {produto.Nome} - {produto.Preco}");
+            }
+            else
+            {
+                _logger.LogWarning($"Produto não encontrado para código: {barcode}");
+                Console.WriteLine($"Produto não encontrado: {barcode}");
+                await SendProductNotFoundAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Erro ao processar código de barras: {barcode}");
+            await SendProductNotFoundAsync();
+        }
+    }
+
+    private string FormatProductName(string nome)
+    {
+        // Formata para 4 linhas x 20 colunas (80 bytes total)
+        var linhas = new List<string>();
+        var nomeLimpo = nome.Replace("\n", " ").Replace("\r", "");
+
+        for (int i = 0; i < 4 && i * 20 < nomeLimpo.Length; i++)
+        {
+            var linha = nomeLimpo.Substring(i * 20, Math.Min(20, nomeLimpo.Length - i * 20));
+            linhas.Add(linha);
+        }
+
+        // Preenche até 4 linhas
+        while (linhas.Count < 4)
+        {
+            linhas.Add(new string(' ', 20));
+        }
+
+        return string.Join("", linhas);
     }
 
     public async Task<bool> SendProductInfoAsync(string nome, string preco)
     {
         if (!IsConnected || _stream == null)
         {
-            _logger.LogWarning("Não conectado ao servidor Gertec. Tentando reconectar...");
-            if (!await ConnectAsync())
-            {
-                return false;
-            }
+            _logger.LogWarning("Não conectado ao Gertec. Não é possível enviar produto.");
+            return false;
         }
 
         try
@@ -187,17 +434,10 @@ public class GertecProtocolService : IDisposable
             string response = $"#{nomeFormatado}|{precoFormatado}";
             byte[] data = Encoding.ASCII.GetBytes(response);
 
-            if (_stream == null)
-            {
-                _logger.LogError("Stream não está disponível");
-                return false;
-            }
-
             await _stream.WriteAsync(data, 0, data.Length);
             await _stream.FlushAsync();
 
-            _logger.LogInformation($"ENVIADO para servidor Gertec: {nome.Trim()} - {preco.Trim()}");
-            Console.WriteLine($"ENVIADO para servidor Gertec: {nome.Trim()} - {preco.Trim()}");
+            _logger.LogInformation($"Produto enviado ao Gertec: {nome.Trim()} - {preco.Trim()}");
             return true;
         }
         catch (Exception ex)
@@ -212,10 +452,7 @@ public class GertecProtocolService : IDisposable
     {
         if (!IsConnected || _stream == null)
         {
-            if (!await ConnectAsync())
-            {
-                return false;
-            }
+            return false;
         }
 
         try
@@ -223,16 +460,16 @@ public class GertecProtocolService : IDisposable
             string response = "#nfound";
             byte[] data = Encoding.ASCII.GetBytes(response);
 
-            await _stream!.WriteAsync(data, 0, data.Length);
+            await _stream.WriteAsync(data, 0, data.Length);
             await _stream.FlushAsync();
 
             _logger.LogInformation("Produto não encontrado enviado ao Gertec");
+            Console.WriteLine("Produto não encontrado enviado ao Gertec");
             return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao enviar 'produto não encontrado' ao Gertec");
-            _isConnected = false;
             return false;
         }
     }
@@ -241,7 +478,7 @@ public class GertecProtocolService : IDisposable
     {
         if (!IsConnected || _stream == null)
         {
-            _logger.LogWarning("Não conectado ao servidor Gertec. Não é possível enviar mensagem.");
+            _logger.LogWarning("Não conectado ao Gertec. Não é possível enviar mensagem.");
             return false;
         }
 
@@ -282,7 +519,7 @@ public class GertecProtocolService : IDisposable
     {
         if (!IsConnected || _stream == null)
         {
-            _logger.LogWarning("Não conectado ao servidor Gertec. Não é possível enviar imagem.");
+            _logger.LogWarning("Não conectado ao Gertec. Não é possível enviar imagem.");
             return false;
         }
 
@@ -327,8 +564,8 @@ public class GertecProtocolService : IDisposable
 
                 if (response.StartsWith("#gif_ok"))
                 {
-                    _logger.LogInformation($"Imagem enviada com sucesso ao servidor Gertec (índice: {indice})");
-                    Console.WriteLine($"Imagem enviada com sucesso ao servidor Gertec (índice: {indice})");
+                    _logger.LogInformation($"Imagem enviada com sucesso ao Gertec (índice: {indice})");
+                    Console.WriteLine($"Imagem enviada com sucesso ao Gertec (índice: {indice})");
                     return true;
                 }
                 else if (response.StartsWith("#img_error"))
@@ -338,8 +575,8 @@ public class GertecProtocolService : IDisposable
                 }
             }
 
-            _logger.LogInformation($"Imagem enviada ao servidor Gertec (índice: {indice}, tamanho: {imageData.Length} bytes)");
-            Console.WriteLine($"Imagem enviada ao servidor Gertec (índice: {indice}, tamanho: {imageData.Length} bytes)");
+            _logger.LogInformation($"Imagem enviada ao Gertec (índice: {indice}, tamanho: {imageData.Length} bytes)");
+            Console.WriteLine($"Imagem enviada ao Gertec (índice: {indice}, tamanho: {imageData.Length} bytes)");
             return true;
         }
         catch (Exception ex)
@@ -424,75 +661,13 @@ public class GertecProtocolService : IDisposable
         }
     }
 
-    /// <summary>
-    /// Configura o terminal Gertec com o IP do servidor usando o comando #rupdconfig
-    /// </summary>
-    public async Task<bool> UpdateTerminalConfigAsync(string gatewayIp, string nomeTerminal = "Meu BPG2")
-    {
-        if (!IsConnected || _stream == null)
-        {
-            _logger.LogWarning("Não conectado ao servidor Gertec. Não é possível atualizar configuração.");
-            return false;
-        }
-
-        try
-        {
-            string servidorNomes = "";
-            string ns = "Não suportado";
-            int extra = 61;
-
-            char tamGateway = (char)(gatewayIp.Length + 48);
-            char tamServidor = (char)(servidorNomes.Length + 48);
-            char tamNome = (char)(nomeTerminal.Length + 48);
-
-            string command = "#rupdconfig" +
-                tamGateway + gatewayIp +
-                tamServidor + servidorNomes +
-                tamNome + nomeTerminal +
-                (char)extra + ns +
-                (char)extra + ns +
-                (char)extra + ns;
-
-            byte[] commandBytes = Encoding.ASCII.GetBytes(command);
-
-            await _stream.WriteAsync(commandBytes, 0, commandBytes.Length);
-            await _stream.FlushAsync();
-
-            await Task.Delay(500);
-
-            if (_stream.DataAvailable)
-            {
-                byte[] responseBuffer = new byte[255];
-                int bytesRead = await _stream.ReadAsync(responseBuffer, 0, responseBuffer.Length);
-                string response = Encoding.ASCII.GetString(responseBuffer, 0, bytesRead);
-
-                if (response.StartsWith("#rupdconfig_ok"))
-                {
-                    _logger.LogInformation($"Configuração do terminal atualizada com sucesso. Gateway: {gatewayIp}, Nome: {nomeTerminal}");
-                    return true;
-                }
-                else
-                {
-                    _logger.LogWarning($"Resposta inesperada do terminal: {response}");
-                    return false;
-                }
-            }
-
-            _logger.LogInformation($"Comando #rupdconfig enviado ao terminal (Gateway: {gatewayIp})");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erro ao atualizar configuração do terminal Gertec");
-            return false;
-        }
-    }
-
     public void Dispose()
     {
         _isConnected = false;
+        _isListening = false;
         _stream?.Dispose();
         _tcpClient?.Dispose();
+        _tcpListener?.Stop();
         _connectionLock.Dispose();
     }
 }

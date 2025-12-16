@@ -54,9 +54,11 @@ builder.Services.Configure<GertecConfig>(
 // Serviços
 builder.Services.AddHttpClient<OlistApiService>();
 builder.Services.AddSingleton<GertecDataFileService>();
+builder.Services.AddSingleton<GertecProductCacheService>();
 builder.Services.AddSingleton<GertecProtocolService>(sp =>
 {
     var logger = sp.GetRequiredService<ILogger<GertecProtocolService>>();
+    var productCache = sp.GetRequiredService<GertecProductCacheService>();
     
     // Prioridade: Variáveis de ambiente > Configuration
     // Formato no .env: GERTEC__IP_ADDRESS, GERTEC__PORT, etc.
@@ -64,7 +66,7 @@ builder.Services.AddSingleton<GertecProtocolService>(sp =>
     {
         IpAddress = Environment.GetEnvironmentVariable("GERTEC__IP_ADDRESS") 
             ?? builder.Configuration["Gertec:IpAddress"] 
-            ?? "192.168.1.3", // IP do servidor Gertec (onde o terminal está rodando)
+            ?? "0.0.0.0", // Escuta em todas as interfaces
         Port = int.TryParse(Environment.GetEnvironmentVariable("GERTEC__PORT"), out var port) 
             ? port 
             : builder.Configuration.GetValue<int>("Gertec:Port", 6500),
@@ -79,8 +81,8 @@ builder.Services.AddSingleton<GertecProtocolService>(sp =>
             : builder.Configuration.GetValue<int>("Gertec:ConnectionTimeoutMilliseconds", 15000)
     };
     
-    Console.WriteLine($"GertecConfig carregado - IP: {config.IpAddress}, Port: {config.Port}");
-    return new GertecProtocolService(logger, config);
+    Console.WriteLine($"GertecConfig carregado - Port: {config.Port} (servidor TCP)");
+    return new GertecProtocolService(logger, config, productCache);
 });
 
 builder.Services.AddHostedService<IntegrationService>();
