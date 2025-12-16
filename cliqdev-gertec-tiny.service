@@ -1,0 +1,23 @@
+[Unit]
+Description=Cliqdev Gertec e Tiny - Integração Gertec/Tiny ERP
+After=network.target
+
+[Service]
+Type=notify
+User=%USER%
+WorkingDirectory=/home/ricardopereira/Área de trabalho/projetos/api-carol
+ExecStart=/usr/bin/dotnet /home/ricardopereira/Área de trabalho/projetos/api-carol/bin/Release/net8.0/OlistGertecIntegration.dll
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cliqdev-gertec-tiny
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_ROOT=/usr/share/dotnet
+
+# Carrega variáveis de ambiente do arquivo .env
+EnvironmentFile=/home/ricardopereira/Área de trabalho/projetos/api-carol/.env
+
+[Install]
+WantedBy=multi-user.target
+

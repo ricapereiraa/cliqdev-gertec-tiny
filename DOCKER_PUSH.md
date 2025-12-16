@@ -2,7 +2,7 @@
 
 ## Status
 
-✅ **Imagem construída com sucesso!**
+ **Imagem construída com sucesso!**
 - Imagem: `icapereiraa/carol-api:latest`
 - Tamanho: ~200MB
 

@@ -1,6 +1,6 @@
 # Habilitar Virtualização pelo CMD e Rodar Docker
 
-## ⚠️ IMPORTANTE
+##  IMPORTANTE
 
 **A virtualização no BIOS NÃO pode ser ativada pelo CMD.** Ela precisa ser habilitada manualmente no BIOS.
 
@@ -36,7 +36,7 @@ Abra **CMD como Administrador** e execute:
 systeminfo | findstr /C:"Hyper-V"
 ```
 
-**Se aparecer:** "A hypervisor has been detected" ✅ Virtualização está OK
+**Se aparecer:** "A hypervisor has been detected"  Virtualização está OK
 
 **Se não aparecer:** Volte ao Passo 1 e habilite no BIOS
 

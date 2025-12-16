@@ -6,6 +6,7 @@ public class GertecConfig
     public int Port { get; set; } = 6500;
     public int ReconnectIntervalSeconds { get; set; } = 5;
     public int ResponseTimeoutMilliseconds { get; set; } = 500;
+    public int ConnectionTimeoutMilliseconds { get; set; } = 10000; // 10 segundos padrão
 }
 
 public class GertecMessage

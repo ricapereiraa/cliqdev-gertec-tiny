@@ -14,7 +14,7 @@ dotnet --version
 - Instale o arquivo baixado
 - Feche e abra o CMD novamente
 
-**Se aparecer `8.0.x` ou superior:** ✅ Pronto, continue!
+**Se aparecer `8.0.x` ou superior:**  Pronto, continue!
 
 ## Passo 2: Ir para a Pasta do Projeto
 
@@ -228,9 +228,9 @@ dotnet run
 
 Após rodar com sucesso:
 
-1. ✅ Deixe o CMD aberto (aplicação precisa estar rodando)
-2. ✅ Teste escanear código de barras no Gertec
-3. ✅ Configure como serviço para rodar automaticamente (opcional)
+1.  Deixe o CMD aberto (aplicação precisa estar rodando)
+2.  Teste escanear código de barras no Gertec
+3.  Configure como serviço para rodar automaticamente (opcional)
 
 ## Nota Importante
 

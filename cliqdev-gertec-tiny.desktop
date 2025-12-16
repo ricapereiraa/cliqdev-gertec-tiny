@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Cliqdev Gertec e Tiny
+Comment=Integração Gertec e Tiny ERP - API de Consulta de Preços
+Exec=/home/ricardopereira/Área de trabalho/projetos/api-carol/run-api.sh
+Icon=/home/ricardopereira/Área de trabalho/projetos/api-carol/icon.png
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=true
+MimeType=
+Keywords=cliqdev;gertec;tiny;erp;api;preços
+

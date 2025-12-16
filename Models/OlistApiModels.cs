@@ -32,6 +32,20 @@ public class RetornoResponse
     
     [JsonProperty("produtos")]
     public List<ProdutoWrapper>? Produtos { get; set; }
+    
+    // Para produto.obter.php - retorna produto único
+    [JsonProperty("produto")]
+    public Produto? Produto { get; set; }
+    
+    // Anexos/imagens do produto (produto.obter.php)
+    [JsonProperty("anexos")]
+    public List<AnexoResponse>? ProdutoAnexos { get; set; }
+}
+
+public class AnexoResponse
+{
+    [JsonProperty("anexo")]
+    public string Anexo { get; set; } = string.Empty;
 }
 
 public class ProdutoWrapper
@@ -87,28 +101,16 @@ public class Produto
     [JsonProperty("data_criacao")]
     public string? DataCriacao { get; set; }
     
-    // Campos de imagem (podem existir na API mesmo não estando na documentação oficial)
+    // Campo de imagem (URL ou caminho local) - opcional
     [JsonProperty("imagem")]
     public string? Imagem { get; set; }
     
-    [JsonProperty("imagem_url")]
-    public string? ImagemUrl { get; set; }
-    
-    [JsonProperty("foto")]
-    public string? Foto { get; set; }
-    
-    [JsonProperty("foto_url")]
-    public string? FotoUrl { get; set; }
+    [JsonProperty("imagem_principal")]
+    public string? ImagemPrincipal { get; set; }
     
     // Campos legados para compatibilidade
     public string Descricao { get; set; } = string.Empty;
     public string Estoque { get; set; } = string.Empty;
-    
-    // Propriedade helper para obter URL de imagem
-    public string? GetImageUrl()
-    {
-        return ImagemUrl ?? FotoUrl ?? Imagem ?? Foto;
-    }
 }
 
 // Mantido para compatibilidade com código existente

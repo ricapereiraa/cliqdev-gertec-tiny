@@ -27,7 +27,7 @@ Abra o **CMD** (Prompt de Comando) e digite:
 dotnet --version
 ```
 
-**Se aparecer:** `8.0.x` ou superior ✅ **Pronto!**
+**Se aparecer:** `8.0.x` ou superior  **Pronto!**
 
 **Se aparecer erro:** 
 - Feche e abra o CMD novamente
@@ -358,11 +358,11 @@ dotnet run
 
 Após rodar com sucesso:
 
-1. ✅ Deixe o CMD aberto (aplicação precisa estar rodando)
-2. ✅ Teste escanear um código de barras no Gertec
-3. ✅ Verifique se o produto aparece no display
-4. ✅ Configure para rodar como serviço (opcional)
-5. ✅ Configure inicialização automática (opcional)
+1.  Deixe o CMD aberto (aplicação precisa estar rodando)
+2.  Teste escanear um código de barras no Gertec
+3.  Verifique se o produto aparece no display
+4.  Configure para rodar como serviço (opcional)
+5.  Configure inicialização automática (opcional)
 
 ## Nota Importante
 
@@ -407,4 +407,4 @@ info: OlistGertecIntegration.Services.IntegrationService[0]
       Serviço de integração iniciado
 ```
 
-E a API responde em http://localhost:5000, **está funcionando!** ✅
+E a API responde em http://localhost:5000, **está funcionando!** 
