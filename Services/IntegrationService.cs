@@ -8,6 +8,7 @@ public class IntegrationService : BackgroundService
     private readonly ILogger<IntegrationService> _logger;
     private readonly GertecProtocolService _gertecService;
     private readonly OlistApiService _olistService;
+    private readonly GertecDataFileService _dataFileService;
     private readonly IConfiguration _configuration;
     private DateTime? _lastSyncDate;
     private readonly Dictionary<string, Produto> _productCache = new();
@@ -16,11 +17,13 @@ public class IntegrationService : BackgroundService
         ILogger<IntegrationService> logger,
         GertecProtocolService gertecService,
         OlistApiService olistService,
+        GertecDataFileService dataFileService,
         IConfiguration configuration)
     {
         _logger = logger;
         _gertecService = gertecService;
         _olistService = olistService;
+        _dataFileService = dataFileService;
         _configuration = configuration;
     }
 
@@ -40,8 +43,32 @@ public class IntegrationService : BackgroundService
             _logger.LogError(ex, "Erro ao pré-carregar cache. Continuando sem cache pré-carregado...");
         }
 
+        // Gera arquivo TXT inicial para servidor TCP oficial do Gertec
+        _logger.LogInformation("Gerando arquivo de dados inicial para servidor TCP Gertec...");
+        Console.WriteLine("Gerando arquivo de dados inicial para servidor TCP Gertec...");
+        try
+        {
+            await _dataFileService.GenerateDataFileAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao gerar arquivo de dados inicial. Continuando...");
+        }
+
         // Conecta ao servidor Gertec
-        await _gertecService.ConnectAsync();
+        _logger.LogInformation("Conectando ao servidor Gertec...");
+        Console.WriteLine("Conectando ao servidor Gertec...");
+        var connected = await _gertecService.ConnectAsync();
+        if (connected)
+        {
+            _logger.LogInformation("Conexão estabelecida com servidor Gertec");
+            Console.WriteLine("Conexão estabelecida com servidor Gertec");
+        }
+        else
+        {
+            _logger.LogWarning("Falha ao conectar ao servidor Gertec. Tentando novamente em 5 segundos...");
+            Console.WriteLine("Falha ao conectar ao servidor Gertec. Tentando novamente em 5 segundos...");
+        }
 
         // Inicia monitoramento de preços se habilitado
         var monitoringEnabled = _configuration.GetValue<bool>("PriceMonitoring:Enabled");
@@ -98,6 +125,7 @@ public class IntegrationService : BackgroundService
             try
             {
                 _logger.LogInformation("Verificando mudanças de preços no Tiny ERP...");
+                Console.WriteLine("VERIFICANDO se há novos produtos ou mudanças de preços no Tiny ERP...");
 
                 // Busca todos os produtos do Tiny ERP
                 var produtos = await _olistService.GetAllProductsAsync(primeiraExecucao ? null : _lastSyncDate);
@@ -109,6 +137,7 @@ public class IntegrationService : BackgroundService
                 else
                 {
                     _logger.LogInformation($"{produtos.Count} produtos verificados desde a última sincronização");
+                    Console.WriteLine($"{produtos.Count} produtos verificados desde a última sincronização");
                 }
 
                 int produtosAtualizados = 0;
@@ -139,6 +168,16 @@ public class IntegrationService : BackgroundService
                             // Atualiza cache local
                             _productCache[chaveProduto] = produto;
                             
+                            // Atualiza arquivo TXT para servidor TCP oficial
+                            try
+                            {
+                                await _dataFileService.UpdateProductInFileAsync(produto);
+                            }
+                            catch (Exception fileEx)
+                            {
+                                _logger.LogWarning(fileEx, $"Erro ao atualizar produto no arquivo de dados: {produto.Nome}");
+                            }
+                            
                             // Envia informações atualizadas para o Gertec
                             if (_gertecService.IsConnected)
                             {
@@ -155,12 +194,36 @@ public class IntegrationService : BackgroundService
                                     
                                     var precoFormatado = _olistService.FormatPrice(preco);
                                     
+                                    // Envia imagem do produto se disponível (antes de enviar nome e preço)
+                                    if (!string.IsNullOrEmpty(produto.Imagem) || !string.IsNullOrEmpty(produto.ImagemPrincipal))
+                                    {
+                                        try
+                                        {
+                                            var imagemUrl = produto.ImagemPrincipal ?? produto.Imagem;
+                                            if (!string.IsNullOrEmpty(imagemUrl))
+                                            {
+                                                _logger.LogInformation($"Enviando imagem do produto atualizado: {imagemUrl}");
+                                                Console.WriteLine($"Enviando imagem do produto: {produto.Nome}");
+                                                var imagemEnviada = await _gertecService.SendImageFromFileAsync(imagemUrl, indice: 0, numeroLoops: 1, tempoExibicao: 5);
+                                                if (imagemEnviada)
+                                                {
+                                                    Console.WriteLine($"Imagem enviada com sucesso para servidor Gertec: {produto.Nome}");
+                                                }
+                                            }
+                                        }
+                                        catch (Exception imgEx)
+                                        {
+                                            _logger.LogWarning(imgEx, $"Erro ao enviar imagem do produto {produto.Nome}. Continuando com nome e preço...");
+                                        }
+                                    }
+                                    
                                     // Envia produto atualizado para o Gertec
                                     bool enviado = await _gertecService.SendProductInfoAsync(nomeFormatado, precoFormatado);
                                     
                                     if (enviado)
                                     {
-                                        _logger.LogInformation($"Produto {produto.Nome} atualizado no Gertec com sucesso");
+                                        _logger.LogInformation($"ENVIADO para servidor Gertec com sucesso: {produto.Nome} - Preço: {precoFormatado}");
+                                        Console.WriteLine($"ENVIADO para servidor Gertec com sucesso: {produto.Nome} - Preço: {precoFormatado}");
                                         produtosAtualizados++;
                                     }
                                     else
@@ -211,6 +274,21 @@ public class IntegrationService : BackgroundService
                     {
                         _logger.LogError(ex, "Erro ao atualizar cache do OlistApiService");
                     }
+
+                    // Regenera arquivo TXT completo quando há mudanças significativas
+                    if (produtosAtualizados > 0 || produtosNovos > 10)
+                    {
+                        _logger.LogInformation("Regenerando arquivo de dados Gertec devido a mudanças...");
+                        Console.WriteLine("Regenerando arquivo de dados Gertec devido a mudanças...");
+                        try
+                        {
+                            await _dataFileService.GenerateDataFileAsync();
+                        }
+                        catch (Exception fileEx)
+                        {
+                            _logger.LogError(fileEx, "Erro ao regenerar arquivo de dados Gertec");
+                        }
+                    }
                 }
                 
                 if (primeiraExecucao)
@@ -223,6 +301,8 @@ public class IntegrationService : BackgroundService
                 {
                     _logger.LogInformation($"Monitoramento concluído: {produtosAtualizados} produtos atualizados, " +
                                           $"{produtosNovos} produtos novos. Cache atualizado. Próxima verificação em {intervalMinutes} minutos.");
+                    Console.WriteLine($"Monitoramento concluído: {produtosAtualizados} produtos atualizados, " +
+                                     $"{produtosNovos} produtos novos. Próxima verificação em {intervalMinutes} minutos.");
                 }
             }
             catch (Exception ex)

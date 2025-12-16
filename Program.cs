@@ -53,6 +53,7 @@ builder.Services.Configure<GertecConfig>(
 
 // Serviços
 builder.Services.AddHttpClient<OlistApiService>();
+builder.Services.AddSingleton<GertecDataFileService>();
 builder.Services.AddSingleton<GertecProtocolService>(sp =>
 {
     var logger = sp.GetRequiredService<ILogger<GertecProtocolService>>();

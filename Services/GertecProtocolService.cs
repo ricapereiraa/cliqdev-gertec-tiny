@@ -93,7 +93,8 @@ public class GertecProtocolService : IDisposable
 
                 _isConnected = true;
 
-                _logger.LogInformation($"Conectado com sucesso ao servidor Gertec em {_config.IpAddress}:{_config.Port}");
+                _logger.LogInformation($"CONECTADO ao servidor Gertec em {_config.IpAddress}:{_config.Port}");
+                Console.WriteLine($"CONECTADO ao servidor Gertec em {_config.IpAddress}:{_config.Port}");
                 return true;
             }
             catch (SocketException ex)
@@ -148,9 +149,16 @@ public class GertecProtocolService : IDisposable
     /// </summary>
     public async Task<bool> ReconnectAsync()
     {
+        _logger.LogInformation("Reconectando ao servidor Gertec...");
+        Console.WriteLine("Reconectando ao servidor Gertec...");
         await DisconnectAsync();
         await Task.Delay(1000);
-        return await ConnectAsync();
+        var connected = await ConnectAsync();
+        if (connected)
+        {
+            Console.WriteLine("Reconectado ao servidor Gertec com sucesso");
+        }
+        return connected;
     }
 
     public async Task<bool> SendProductInfoAsync(string nome, string preco)
@@ -188,7 +196,8 @@ public class GertecProtocolService : IDisposable
             await _stream.WriteAsync(data, 0, data.Length);
             await _stream.FlushAsync();
 
-            _logger.LogInformation($"Produto enviado ao Gertec: {nome.Trim()} - {preco.Trim()}");
+            _logger.LogInformation($"ENVIADO para servidor Gertec: {nome.Trim()} - {preco.Trim()}");
+            Console.WriteLine($"ENVIADO para servidor Gertec: {nome.Trim()} - {preco.Trim()}");
             return true;
         }
         catch (Exception ex)
@@ -318,7 +327,8 @@ public class GertecProtocolService : IDisposable
 
                 if (response.StartsWith("#gif_ok"))
                 {
-                    _logger.LogInformation($"Imagem enviada com sucesso ao Gertec (índice: {indice})");
+                    _logger.LogInformation($"Imagem enviada com sucesso ao servidor Gertec (índice: {indice})");
+                    Console.WriteLine($"Imagem enviada com sucesso ao servidor Gertec (índice: {indice})");
                     return true;
                 }
                 else if (response.StartsWith("#img_error"))
@@ -328,7 +338,8 @@ public class GertecProtocolService : IDisposable
                 }
             }
 
-            _logger.LogInformation($"Imagem enviada ao Gertec (índice: {indice}, tamanho: {imageData.Length} bytes)");
+            _logger.LogInformation($"Imagem enviada ao servidor Gertec (índice: {indice}, tamanho: {imageData.Length} bytes)");
+            Console.WriteLine($"Imagem enviada ao servidor Gertec (índice: {indice}, tamanho: {imageData.Length} bytes)");
             return true;
         }
         catch (Exception ex)

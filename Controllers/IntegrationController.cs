@@ -11,15 +11,18 @@ public class IntegrationController : ControllerBase
     private readonly ILogger<IntegrationController> _logger;
     private readonly GertecProtocolService _gertecService;
     private readonly OlistApiService _olistService;
+    private readonly GertecDataFileService _dataFileService;
 
     public IntegrationController(
         ILogger<IntegrationController> logger,
         GertecProtocolService gertecService,
-        OlistApiService olistService)
+        OlistApiService olistService,
+        GertecDataFileService dataFileService)
     {
         _logger = logger;
         _gertecService = gertecService;
         _olistService = olistService;
+        _dataFileService = dataFileService;
     }
 
     [HttpGet("status")]
@@ -174,6 +177,24 @@ public class IntegrationController : ControllerBase
                     
                     var precoFormatado = _olistService.FormatPrice(preco);
 
+                    // Envia imagem do produto se disponível (antes de enviar nome e preço)
+                    if (!string.IsNullOrEmpty(produto.Imagem) || !string.IsNullOrEmpty(produto.ImagemPrincipal))
+                    {
+                        try
+                        {
+                            var imagemUrl = produto.ImagemPrincipal ?? produto.Imagem;
+                            if (!string.IsNullOrEmpty(imagemUrl))
+                            {
+                                _logger.LogInformation($"Enviando imagem do produto: {imagemUrl}");
+                                await _gertecService.SendImageFromFileAsync(imagemUrl, indice: 0, numeroLoops: 1, tempoExibicao: 5);
+                            }
+                        }
+                        catch (Exception imgEx)
+                        {
+                            _logger.LogWarning(imgEx, $"Erro ao enviar imagem do produto {produto.Nome}. Continuando com nome e preço...");
+                        }
+                    }
+
                     // Envia para o Gertec
                     bool enviado = await _gertecService.SendProductInfoAsync(nomeFormatado, precoFormatado);
                     
@@ -213,6 +234,54 @@ public class IntegrationController : ControllerBase
                 message = "Erro ao sincronizar preços",
                 error = ex.Message
             });
+        }
+    }
+
+    [HttpPost("gertec/datafile/generate")]
+    public async Task<IActionResult> GenerateDataFile()
+    {
+        try
+        {
+            _logger.LogInformation("Gerando arquivo de dados Gertec manualmente...");
+            var success = await _dataFileService.GenerateDataFileAsync();
+            
+            if (success)
+            {
+                return Ok(new
+                {
+                    message = "Arquivo de dados Gertec gerado com sucesso",
+                    filePath = _dataFileService.GetDataFilePath(),
+                    fileExists = _dataFileService.FileExists()
+                });
+            }
+            
+            return BadRequest(new { message = "Falha ao gerar arquivo de dados Gertec" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao gerar arquivo de dados Gertec");
+            return StatusCode(500, new { message = "Erro ao gerar arquivo de dados", error = ex.Message });
+        }
+    }
+
+    [HttpGet("gertec/datafile/info")]
+    public IActionResult GetDataFileInfo()
+    {
+        try
+        {
+            return Ok(new
+            {
+                filePath = _dataFileService.GetDataFilePath(),
+                fileExists = _dataFileService.FileExists(),
+                fileSize = _dataFileService.FileExists() 
+                    ? new FileInfo(_dataFileService.GetDataFilePath()).Length 
+                    : 0
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter informações do arquivo de dados");
+            return StatusCode(500, new { message = "Erro ao obter informações", error = ex.Message });
         }
     }
 
