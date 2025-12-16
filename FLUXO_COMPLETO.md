@@ -1,6 +1,6 @@
 # Fluxo Completo da Integração Gertec + Tiny ERP
 
-## 📋 Visão Geral
+## Visão Geral
 
 Este documento detalha o fluxo completo de funcionamento da integração entre o terminal Gertec Busca Preço G2 S e o Tiny ERP (Olist).
 
@@ -257,7 +257,7 @@ Quando detecta mudança de preço:
 
 ---
 
-## 🔧 Configurações
+## Configurações
 
 ### appsettings.json
 

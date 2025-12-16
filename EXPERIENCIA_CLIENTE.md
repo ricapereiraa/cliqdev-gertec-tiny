@@ -1,6 +1,6 @@
 # Experiência do Cliente no Terminal Gertec
 
-## 🎬 O que o Cliente Vê - Timeline Completa
+## O que o Cliente Vê - Timeline Completa
 
 ### Cenário: Cliente escaneia código de barras GTIN `7898132989040`
 
@@ -158,7 +158,7 @@ await _gertecService.SendMessageAsync("Consultando...", "Aguarde", 5);
 
 ---
 
-## 📈 Otimizações para Reduzir Tempo
+## Otimizações para Reduzir Tempo
 
 ### **1. Cache Agressivo (já implementado)**
 - Cache de 30 segundos
@@ -175,7 +175,7 @@ await _gertecService.SendMessageAsync("Consultando...", "Aguarde", 5);
 
 ---
 
-## 🎬 Fluxo Visual Completo
+## Fluxo Visual Completo
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -237,5 +237,5 @@ await _gertecService.SendMessageAsync("Consultando...", "Aguarde", 5);
 -  Cache implementado (30s)
 -  Resposta imediata evita "conexão falhou"
 
-**Resultado:** Experiência do cliente é boa, mesmo com limitação da API! 🎉
+**Resultado:** Experiência do cliente é boa, mesmo com limitação da API!
 

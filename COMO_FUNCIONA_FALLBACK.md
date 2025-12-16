@@ -168,7 +168,7 @@ formato=json
 ### Processamento (linha 103-118):
 
 ```csharp
-// 📦 Recebe TODOS os produtos (pode ser centenas ou milhares)
+// Recebe TODOS os produtos (pode ser centenas ou milhares)
 var todosProdutos = await GetAllProductsAsync();
 // todosProdutos = [Produto1, Produto2, Produto3, ..., ProdutoN]
 
@@ -202,14 +202,14 @@ return null;
 
 ---
 
-## 💾 Passo 4: Atualização do Cache
+## Passo 4: Atualização do Cache
 
 ### O que acontece (linha 109-114):
 
 ```csharp
 if (produtoPorGtin != null)
 {
-    // 💾 Salva no cache para próximas consultas
+    // Salva no cache para próximas consultas
     lock (_cacheLock)
     {
         _gtinCache["7898132989040"] = (produtoPorGtin, DateTime.Now);
@@ -226,7 +226,7 @@ if (produtoPorGtin != null)
 
 **Resultado:** 
 -  Produto encontrado e retornado
-- 💾 Cache atualizado (próxima consulta será instantânea se dentro de 30s)
+- Cache atualizado (próxima consulta será instantânea se dentro de 30s)
 
 ---
 
@@ -372,9 +372,9 @@ Mesmo que a API **não busque** por GTIN, ela **retorna o GTIN** em cada produto
 **Quando a busca direta falha:**
 1.  API retorna erro "não encontrou"
 2.  Sistema busca TODOS os produtos
-3. 🔎 Filtra localmente pelo GTIN
-4.  Encontra o produto correto
-5. 💾 Salva no cache para próxima vez
+3. Filtra localmente pelo GTIN
+4. Encontra o produto correto
+5. Salva no cache para próxima vez
 
-**Resultado:** Sistema sempre encontra o produto, mesmo com a limitação da API! 🎉
+**Resultado:** Sistema sempre encontra o produto, mesmo com a limitação da API!
 

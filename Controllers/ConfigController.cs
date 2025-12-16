@@ -91,23 +91,26 @@ public class ConfigController : ControllerBase
             }
 
             // Atualiza arquivo .env
+            // NOTA: Agora é o IP do SERVIDOR Gertec (onde o terminal está rodando)
             await UpdateEnvFileAsync("GERTEC__IP_ADDRESS", request.IpAddress);
 
-            // Atualiza IP no serviço e reconecta
-            var connected = await _gertecService.UpdateIpAddressAsync(request.IpAddress);
+            // Reconecta ao servidor Gertec com novo IP
+            await _gertecService.DisconnectAsync();
+            await Task.Delay(1000);
+            var connected = await _gertecService.ConnectAsync();
 
-            _logger.LogInformation($"IP do Gertec atualizado para: {request.IpAddress}");
+            _logger.LogInformation($"IP do servidor Gertec atualizado para: {request.IpAddress}");
 
             return Ok(new
             {
-                message = "IP do Gertec atualizado com sucesso",
+                message = "IP do servidor Gertec atualizado com sucesso",
                 ipAddress = request.IpAddress,
                 connected = connected
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao atualizar IP do Gertec");
+            _logger.LogError(ex, "Erro ao atualizar IP do servidor");
             return StatusCode(500, new { message = "Erro ao atualizar IP", error = ex.Message });
         }
     }
@@ -148,19 +151,18 @@ public class ConfigController : ControllerBase
     {
         try
         {
-            await _gertecService.DisconnectAsync();
-            await Task.Delay(1000);
-            var connected = await _gertecService.ConnectAsync();
+            // Reconecta ao servidor Gertec
+            var connected = await _gertecService.ReconnectAsync();
 
             if (connected)
             {
-                return Ok(new { message = "Reconectado ao Gertec com sucesso", connected = true });
+                return Ok(new { message = "Reconectado ao servidor Gertec com sucesso", connected = true });
             }
-            return BadRequest(new { message = "Falha ao reconectar ao Gertec", connected = false });
+            return BadRequest(new { message = "Falha ao reconectar ao servidor Gertec", connected = false });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao reconectar Gertec");
+            _logger.LogError(ex, "Erro ao reconectar ao servidor Gertec");
             return StatusCode(500, new { message = "Erro ao reconectar", error = ex.Message });
         }
     }

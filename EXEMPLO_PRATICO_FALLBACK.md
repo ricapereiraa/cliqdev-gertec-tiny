@@ -1,6 +1,6 @@
 # Exemplo Prático: Como o Fallback Funciona
 
-## 🎬 Cenário Real
+## Cenário Real
 
 **Código de barras escaneado no Gertec:** `7898132989040`
 
@@ -324,7 +324,7 @@ Consulta GTIN: 7898132989040
     │   └─►  Encontra produto com GTIN = 7898132989040
     │
     ├─► Atualiza Cache
-    │   └─► 💾 Salva para próxima vez
+    │   └─► Salva para próxima vez
     │
     └─►  Retorna Produto Encontrado!
 ```
@@ -374,5 +374,5 @@ Nossa Aplicação:
 4. **Encontra o produto** correto
 5. **Salva no cache** para otimizar próximas consultas
 
-**Resultado:** Sempre funciona, mesmo com a limitação da API! 🎉
+**Resultado:** Sempre funciona, mesmo com a limitação da API!
 

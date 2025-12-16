@@ -11,14 +11,14 @@ dotnet publish -c Release -o bin/Release/net8.0/publish
 
 ### Passo 2: Editar o arquivo de serviço
 
-Edite o arquivo `cliqdev-gertec-tiny.service` e ajuste:
+Edite o arquivo `api-carol.service` (ou renomeie para `cliqdev-gertec-tiny.service`) e ajuste:
 - `User=%USER%` → Substitua por seu usuário (ex: `User=ricardopereira`)
 - Caminhos absolutos se necessário
 
 ### Passo 3: Copiar o arquivo de serviço
 
 ```bash
-sudo cp cliqdev-gertec-tiny.service /etc/systemd/system/
+sudo cp api-carol.service /etc/systemd/system/cliqdev-gertec-tiny.service
 ```
 
 ### Passo 4: Recarregar systemd
@@ -30,38 +30,38 @@ sudo systemctl daemon-reload
 ### Passo 5: Habilitar o serviço (inicia automaticamente)
 
 ```bash
-sudo systemctl enable cliqdev-gertec-tiny.service
+sudo systemctl enable api-carol.service
 ```
 
 ### Passo 6: Iniciar o serviço
 
 ```bash
-sudo systemctl start cliqdev-gertec-tiny.service
+sudo systemctl start api-carol.service
 ```
 
 ### Verificar status
 
 ```bash
-sudo systemctl status cliqdev-gertec-tiny.service
+sudo systemctl status api-carol.service
 ```
 
 ### Ver logs
 
 ```bash
-sudo journalctl -u cliqdev-gertec-tiny.service -f
+sudo journalctl -u api-carol.service -f
 ```
 
 ### Comandos úteis
 
 ```bash
 # Parar o serviço
-sudo systemctl stop cliqdev-gertec-tiny.service
+sudo systemctl stop api-carol.service
 
 # Reiniciar o serviço
-sudo systemctl restart cliqdev-gertec-tiny.service
+sudo systemctl restart api-carol.service
 
 # Desabilitar início automático
-sudo systemctl disable cliqdev-gertec-tiny.service
+sudo systemctl disable api-carol.service
 ```
 
 ## Opção 2: Autostart do Desktop (Inicia quando usuário faz login)
@@ -74,19 +74,19 @@ chmod +x run-api.sh
 
 ### Passo 2: Editar o arquivo .desktop
 
-Edite `cliqdev-gertec-tiny.desktop` e ajuste os caminhos se necessário.
+Edite `api-carol.desktop` e ajuste os caminhos se necessário.
 
 ### Passo 3: Copiar para autostart
 
 ```bash
 mkdir -p ~/.config/autostart
-cp cliqdev-gertec-tiny.desktop ~/.config/autostart/
+cp api-carol.desktop ~/.config/autostart/
 ```
 
 ### Passo 4: Tornar o .desktop executável
 
 ```bash
-chmod +x ~/.config/autostart/cliqdev-gertec-tiny.desktop
+chmod +x ~/.config/autostart/api-carol.desktop
 ```
 
 A aplicação iniciará automaticamente quando você fizer login.
@@ -102,21 +102,21 @@ chmod +x run-api.sh
 ### Passo 2: Tornar o .desktop executável
 
 ```bash
-chmod +x cliqdev-gertec-tiny.desktop
+chmod +x api-carol.desktop
 ```
 
 ### Passo 3: Copiar para a área de trabalho
 
 ```bash
-cp cliqdev-gertec-tiny.desktop ~/Área\ de\ trabalho/
+cp api-carol.desktop ~/Área\ de\ trabalho/
 ```
 
-OU arraste o arquivo `cliqdev-gertec-tiny.desktop` para a área de trabalho.
+OU arraste o arquivo `api-carol.desktop` para a área de trabalho.
 
 ### Passo 4: Tornar executável na área de trabalho
 
 ```bash
-chmod +x ~/Área\ de\ trabalho/cliqdev-gertec-tiny.desktop
+chmod +x ~/Área\ de\ trabalho/api-carol.desktop
 ```
 
 ## Configurar Ícone Personalizado
@@ -131,7 +131,7 @@ chmod +x ~/Área\ de\ trabalho/cliqdev-gertec-tiny.desktop
 
 ### Passo 2: Atualizar o caminho no .desktop
 
-Edite `cliqdev-gertec-tiny.desktop` e ajuste o caminho do ícone:
+Edite `api-carol.desktop` e ajuste o caminho do ícone:
 ```
 Icon=/home/ricardopereira/Área de trabalho/projetos/api-carol/icon.png
 ```
@@ -147,7 +147,7 @@ Icon=/home/ricardopereira/Área de trabalho/projetos/api-carol/icon.png
 
 ```bash
 # Verificar se o serviço está rodando
-sudo systemctl status cliqdev-gertec-tiny.service
+sudo systemctl status api-carol.service
 
 # Verificar se a API está respondendo
 curl http://localhost:5000/api/config/status

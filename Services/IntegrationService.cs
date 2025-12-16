@@ -22,9 +22,6 @@ public class IntegrationService : BackgroundService
         _gertecService = gertecService;
         _olistService = olistService;
         _configuration = configuration;
-        
-        // Configura evento de código de barras recebido
-        _gertecService.BarcodeReceived += OnBarcodeReceived;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -43,7 +40,7 @@ public class IntegrationService : BackgroundService
             _logger.LogError(ex, "Erro ao pré-carregar cache. Continuando sem cache pré-carregado...");
         }
 
-        // Conecta ao Gertec
+        // Conecta ao servidor Gertec
         await _gertecService.ConnectAsync();
 
         // Inicia monitoramento de preços se habilitado
@@ -54,115 +51,18 @@ public class IntegrationService : BackgroundService
         }
 
         // Mantém o serviço rodando e reconecta se necessário
-        int tentativasConsecutivas = 0;
-        const int maxTentativasAntesDelay = 3;
-        
         while (!stoppingToken.IsCancellationRequested)
         {
             if (!_gertecService.IsConnected)
             {
-                _logger.LogWarning("Conexão com Gertec perdida. Tentando reconectar...");
-                
-                var conectado = await _gertecService.ConnectAsync();
-                
-                if (conectado)
-                {
-                    tentativasConsecutivas = 0;
-                    _logger.LogInformation("Reconectado ao Gertec com sucesso");
-                }
-                else
-                {
-                    tentativasConsecutivas++;
-                    
-                    // Após várias tentativas falhas, aumenta o intervalo entre tentativas
-                    if (tentativasConsecutivas >= maxTentativasAntesDelay)
-                    {
-                        var reconnectInterval = _configuration.GetValue<int>("Gertec:ReconnectIntervalSeconds", 5);
-                        var delayAumentado = reconnectInterval * tentativasConsecutivas;
-                        _logger.LogWarning($"Múltiplas tentativas de reconexão falharam. Aguardando {delayAumentado} segundos antes da próxima tentativa...");
-                        await Task.Delay(TimeSpan.FromSeconds(delayAumentado), stoppingToken);
-                    }
-                    else
-                    {
-                        await Task.Delay(5000, stoppingToken);
-                    }
-                }
+                _logger.LogWarning("Conexão perdida com servidor Gertec. Tentando reconectar...");
+                await _gertecService.ReconnectAsync();
             }
-            else
-            {
-                tentativasConsecutivas = 0;
-                await Task.Delay(5000, stoppingToken);
-            }
+            
+            await Task.Delay(5000, stoppingToken);
         }
     }
 
-    private async void OnBarcodeReceived(object? sender, string barcode)
-    {
-        try
-        {
-            _logger.LogInformation($"Processando código de barras: {barcode}");
-
-            // Envia mensagem de "processando" imediatamente para evitar "conexão falhou" no terminal
-            // Isso garante que o terminal saiba que recebeu o código e está processando
-            // Tempo aumentado para 5 segundos para cobrir busca completa (GTIN pode demorar 3-4s)
-            if (_gertecService.IsConnected)
-            {
-                await _gertecService.SendMessageAsync("Consultando...", "Aguarde", 5);
-            }
-
-            // Busca produto no Olist
-            var produto = await _olistService.GetProductByBarcodeAsync(barcode);
-
-            if (produto != null)
-            {
-                // Formata nome para 4 linhas x 20 colunas (80 bytes)
-                var nomeFormatado = FormatProductName(produto.Nome);
-                
-                // Usa preço promocional se disponível e maior que zero, senão usa preço normal
-                var preco = !string.IsNullOrEmpty(produto.PrecoPromocional) && 
-                           decimal.TryParse(produto.PrecoPromocional, out var precoPromo) && 
-                           precoPromo > 0
-                    ? produto.PrecoPromocional 
-                    : produto.Preco;
-                
-                var precoFormatado = _olistService.FormatPrice(preco);
-
-                // Envia imagem do produto se disponível (antes de enviar nome e preço)
-                if (!string.IsNullOrEmpty(produto.Imagem) || !string.IsNullOrEmpty(produto.ImagemPrincipal))
-                {
-                    try
-                    {
-                        var imagemUrl = produto.ImagemPrincipal ?? produto.Imagem;
-                        if (!string.IsNullOrEmpty(imagemUrl))
-                        {
-                            _logger.LogInformation($"Enviando imagem do produto: {imagemUrl}");
-                            await _gertecService.SendImageFromFileAsync(imagemUrl, indice: 0, numeroLoops: 1, tempoExibicao: 5);
-                        }
-                    }
-                    catch (Exception imgEx)
-                    {
-                        _logger.LogWarning(imgEx, "Erro ao enviar imagem do produto. Continuando com nome e preço...");
-                    }
-                }
-
-                // Envia nome e preço para o Gertec
-                await _gertecService.SendProductInfoAsync(nomeFormatado, precoFormatado);
-                
-                // Atualiza cache
-                _productCache[barcode] = produto;
-            }
-            else
-            {
-                _logger.LogWarning($"Produto não encontrado para código: {barcode}");
-                await _gertecService.SendProductNotFoundAsync();
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Erro ao processar código de barras: {barcode}");
-            await _gertecService.SendProductNotFoundAsync();
-        }
-    }
 
     private string FormatProductName(string nome)
     {
@@ -336,7 +236,6 @@ public class IntegrationService : BackgroundService
 
     public override void Dispose()
     {
-        _gertecService.BarcodeReceived -= OnBarcodeReceived;
         base.Dispose();
     }
 }

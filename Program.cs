@@ -63,7 +63,7 @@ builder.Services.AddSingleton<GertecProtocolService>(sp =>
     {
         IpAddress = Environment.GetEnvironmentVariable("GERTEC__IP_ADDRESS") 
             ?? builder.Configuration["Gertec:IpAddress"] 
-            ?? "192.168.1.57",
+            ?? "192.168.1.3", // IP do servidor Gertec (onde o terminal está rodando)
         Port = int.TryParse(Environment.GetEnvironmentVariable("GERTEC__PORT"), out var port) 
             ? port 
             : builder.Configuration.GetValue<int>("Gertec:Port", 6500),

@@ -82,7 +82,7 @@ Baseado nos testes, o parâmetro `pesquisa` busca em:
 
 ---
 
-## 🔧 Por que Isso Acontece?
+## Por que Isso Acontece?
 
 ### Limitação da API Tiny ERP
 
@@ -101,7 +101,7 @@ O campo **GTIN** (código de barras EAN) é um campo **informativo**, mas **não
 
 ---
 
-## 💡 Nossa Solução (Fallback)
+## Nossa Solução (Fallback)
 
 Como a API não busca por GTIN diretamente, implementamos uma estratégia de **fallback**:
 
@@ -129,7 +129,7 @@ var produto = todosProdutos
 
 ---
 
-## 📈 Performance
+## Performance
 
 ### Busca Direta (SKU ou Nome)
 -  **Rápida** (~100-200ms)
@@ -170,5 +170,5 @@ var produto = todosProdutos
 -  Cache para otimizar consultas repetidas
 -  Invalida cache quando preço muda
 
-**Resultado:** Sistema funciona perfeitamente, mesmo com a limitação da API! 🎉
+**Resultado:** Sistema funciona perfeitamente, mesmo com a limitação da API!
 
