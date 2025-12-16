@@ -126,6 +126,44 @@ public class IntegrationController : ControllerBase
         }
     }
 
+    [HttpPost("gertec/datafile/test")]
+    public async Task<IActionResult> GenerateTestDataFile([FromQuery] int limit = 10)
+    {
+        try
+        {
+            _logger.LogInformation($"Gerando arquivo de dados Gertec para TESTE (limitando a {limit} produtos)...");
+            Console.WriteLine($"Gerando arquivo de dados Gertec para TESTE (limitando a {limit} produtos)...");
+            
+            var success = await _dataFileService.GenerateTestDataFileAsync(limit);
+            
+            if (success)
+            {
+                var fileInfo = new FileInfo(_dataFileService.GetDataFilePath());
+                var lineCount = 0;
+                if (fileInfo.Exists)
+                {
+                    lineCount = System.IO.File.ReadAllLines(_dataFileService.GetDataFilePath()).Length;
+                }
+                
+                return Ok(new
+                {
+                    message = $"Arquivo de dados Gertec gerado com sucesso para teste ({limit} produtos)",
+                    filePath = _dataFileService.GetDataFilePath(),
+                    fileExists = _dataFileService.FileExists(),
+                    fileSize = fileInfo.Exists ? fileInfo.Length : 0,
+                    lineCount = lineCount
+                });
+            }
+            
+            return BadRequest(new { message = "Falha ao gerar arquivo de dados Gertec para teste" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao gerar arquivo de dados Gertec para teste");
+            return StatusCode(500, new { message = "Erro ao gerar arquivo de dados para teste", error = ex.Message });
+        }
+    }
+
     private string FormatProductName(string nome)
     {
         // Formata para 4 linhas x 20 colunas (80 bytes total)

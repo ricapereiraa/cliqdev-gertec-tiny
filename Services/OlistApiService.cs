@@ -297,6 +297,54 @@ public class OlistApiService
     }
 
     /// <summary>
+    /// Busca alguns produtos do Tiny ERP para teste (apenas primeira página)
+    /// </summary>
+    public async Task<List<Produto>> GetTestProductsAsync(int limit = 10)
+    {
+        try
+        {
+            _logger.LogInformation($"Buscando {limit} produtos para teste...");
+            Console.WriteLine($"Buscando {limit} produtos para teste...");
+
+            var content = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("token", _token),
+                new KeyValuePair<string, string>("formato", _format),
+                new KeyValuePair<string, string>("pagina", "1"),
+                new KeyValuePair<string, string>("registrosPorPagina", limit.ToString())
+            });
+
+            var response = await _httpClient.PostAsync($"{_baseUrl}/produtos.pesquisa.php", content);
+            response.EnsureSuccessStatusCode();
+
+            var responseContent = await response.Content.ReadAsStringAsync();
+            
+            var apiResponse = JsonConvert.DeserializeObject<TinyApiResponse>(responseContent);
+            
+            if (apiResponse?.Retorno?.Status == "OK" && apiResponse.Retorno.Produtos != null)
+            {
+                var produtos = apiResponse.Retorno.Produtos
+                    .Where(p => p.Produto != null)
+                    .Select(p => p.Produto!)
+                    .Take(limit)
+                    .ToList();
+
+                _logger.LogInformation($"Teste: {produtos.Count} produtos encontrados");
+                Console.WriteLine($"Teste: {produtos.Count} produtos encontrados");
+                return produtos;
+            }
+
+            _logger.LogWarning("Teste: Nenhum produto encontrado na API");
+            return new List<Produto>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao buscar produtos para teste");
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Busca TODOS os produtos do Tiny ERP sem limite de paginação
     /// Garante que todos os produtos cadastrados sejam retornados
     /// </summary>

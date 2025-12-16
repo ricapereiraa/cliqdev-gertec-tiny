@@ -28,7 +28,22 @@ public class IntegrationService : BackgroundService
     {
         _logger.LogInformation("Serviço de integração iniciado");
 
-        // Pré-carrega cache de produtos na inicialização (sua ideia!)
+        // PASSO 1: Garante que arquivo existe ANTES de qualquer operação
+        _logger.LogInformation("Garantindo que arquivo existe ANTES de buscar produtos...");
+        Console.WriteLine("Garantindo que arquivo existe ANTES de buscar produtos...");
+        if (!_dataFileService.FileExists())
+        {
+            _logger.LogInformation("Criando arquivo vazio ANTES de buscar produtos...");
+            Console.WriteLine("Criando arquivo vazio ANTES de buscar produtos...");
+            await _dataFileService.CreateEmptyFileAsync();
+        }
+        else
+        {
+            _logger.LogInformation("Arquivo já existe, será atualizado com produtos encontrados");
+            Console.WriteLine("Arquivo já existe, será atualizado com produtos encontrados");
+        }
+
+        // PASSO 2: Pré-carrega cache de produtos na inicialização
         _logger.LogInformation("Pré-carregando cache de produtos...");
         try
         {
@@ -40,16 +55,29 @@ public class IntegrationService : BackgroundService
             _logger.LogError(ex, "Erro ao pré-carregar cache. Continuando sem cache pré-carregado...");
         }
 
-        // Gera arquivo TXT inicial
-        _logger.LogInformation("Gerando arquivo de dados inicial...");
-        Console.WriteLine("Gerando arquivo de dados inicial...");
+        // PASSO 3: Busca produtos e registra no arquivo (arquivo já existe, será atualizado)
+        _logger.LogInformation("Buscando produtos e registrando no arquivo...");
+        Console.WriteLine("Buscando produtos e registrando no arquivo...");
         try
         {
-            await _dataFileService.GenerateDataFileAsync();
+            var sucesso = await _dataFileService.GenerateDataFileAsync();
+            if (sucesso)
+            {
+                var caminho = _dataFileService.GetDataFilePath();
+                var existe = _dataFileService.FileExists();
+                _logger.LogInformation($"Produtos registrados no arquivo. Caminho: {caminho}, Existe: {existe}");
+                Console.WriteLine($"Produtos registrados no arquivo. Caminho: {caminho}, Existe: {existe}");
+            }
+            else
+            {
+                _logger.LogWarning("Falha ao registrar produtos no arquivo");
+                Console.WriteLine("AVISO: Falha ao registrar produtos no arquivo");
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao gerar arquivo de dados inicial. Continuando...");
+            _logger.LogError(ex, "Erro ao registrar produtos no arquivo. Continuando...");
+            Console.WriteLine($"ERRO ao registrar produtos no arquivo: {ex.Message}");
         }
 
         // Inicia monitoramento automático - busca atualizações e atualiza arquivo a cada 1 minuto
@@ -202,21 +230,12 @@ public class IntegrationService : BackgroundService
                         _logger.LogError(ex, "Erro ao atualizar cache do OlistApiService");
                     }
 
-                    // Regenera arquivo TXT completo quando há mudanças ou na primeira execução
-                    if (primeiraExecucao || produtosAtualizados > 0 || produtosNovos > 0)
+                    // Apenas atualiza produtos individuais no arquivo existente (não regenera tudo)
+                    // O arquivo já foi criado na inicialização, apenas atualizamos produtos modificados
+                    if (produtosAtualizados > 0 || produtosNovos > 0)
                     {
-                        _logger.LogInformation("Regenerando arquivo de dados com todos os produtos...");
-                        Console.WriteLine("Regenerando arquivo de dados com todos os produtos...");
-                        try
-                        {
-                            await _dataFileService.GenerateDataFileAsync();
-                            _logger.LogInformation("Arquivo de dados atualizado com sucesso");
-                            Console.WriteLine("Arquivo de dados atualizado com sucesso");
-                        }
-                        catch (Exception fileEx)
-                        {
-                            _logger.LogError(fileEx, "Erro ao regenerar arquivo de dados");
-                        }
+                        _logger.LogInformation($"Arquivo atualizado: {produtosAtualizados} produtos modificados, {produtosNovos} produtos novos adicionados");
+                        Console.WriteLine($"Arquivo atualizado: {produtosAtualizados} produtos modificados, {produtosNovos} produtos novos adicionados");
                     }
                 }
                 
