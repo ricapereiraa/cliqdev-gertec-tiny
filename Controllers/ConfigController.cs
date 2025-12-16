@@ -12,19 +12,19 @@ public class ConfigController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly ILogger<ConfigController> _logger;
     private readonly string _envPath;
-    private readonly GertecProtocolService _gertecService;
     private readonly OlistApiService _olistService;
+    private readonly GertecDataFileService _dataFileService;
 
     public ConfigController(
         IConfiguration configuration,
         ILogger<ConfigController> logger,
-        GertecProtocolService gertecService,
-        OlistApiService olistService)
+        OlistApiService olistService,
+        GertecDataFileService dataFileService)
     {
         _configuration = configuration;
         _logger = logger;
-        _gertecService = gertecService;
         _olistService = olistService;
+        _dataFileService = dataFileService;
         
         // Usa arquivo .env na raiz do projeto
         _envPath = Path.Combine(AppContext.BaseDirectory, ".env");
@@ -51,12 +51,8 @@ public class ConfigController : ControllerBase
                 },
                 gertec = new
                 {
-                    ipAddress = _configuration["Gertec:IpAddress"],
-                    port = _configuration["Gertec:Port"],
-                    reconnectIntervalSeconds = _configuration["Gertec:ReconnectIntervalSeconds"],
-                    responseTimeoutMilliseconds = _configuration["Gertec:ResponseTimeoutMilliseconds"],
-                    connectionTimeoutMilliseconds = _configuration["Gertec:ConnectionTimeoutMilliseconds"],
-                    isConnected = _gertecService.IsConnected
+                    dataFilePath = _dataFileService.GetDataFilePath(),
+                    dataFileExists = _dataFileService.FileExists()
                 },
                 priceMonitoring = new
                 {
@@ -74,46 +70,6 @@ public class ConfigController : ControllerBase
         }
     }
 
-    [HttpPut("gertec/ip")]
-    public async Task<IActionResult> UpdateGertecIp([FromBody] UpdateIpRequest request)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(request.IpAddress))
-            {
-                return BadRequest(new { message = "IP Address é obrigatório" });
-            }
-
-            // Valida formato de IP
-            if (!System.Net.IPAddress.TryParse(request.IpAddress, out _))
-            {
-                return BadRequest(new { message = "Formato de IP inválido" });
-            }
-
-            // Atualiza arquivo .env
-            // NOTA: Agora é o IP do SERVIDOR Gertec (onde o terminal está rodando)
-            await UpdateEnvFileAsync("GERTEC__IP_ADDRESS", request.IpAddress);
-
-            // Reconecta ao servidor Gertec com novo IP
-            await _gertecService.DisconnectAsync();
-            await Task.Delay(1000);
-            var connected = await _gertecService.ConnectAsync();
-
-            _logger.LogInformation($"IP do servidor Gertec atualizado para: {request.IpAddress}");
-
-            return Ok(new
-            {
-                message = "IP do servidor Gertec atualizado com sucesso",
-                ipAddress = request.IpAddress,
-                connected = connected
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erro ao atualizar IP do servidor");
-            return StatusCode(500, new { message = "Erro ao atualizar IP", error = ex.Message });
-        }
-    }
 
     [HttpPut("olist/token")]
     public async Task<IActionResult> UpdateOlistToken([FromBody] UpdateTokenRequest request)
@@ -146,24 +102,29 @@ public class ConfigController : ControllerBase
         }
     }
 
-    [HttpPost("gertec/reconnect")]
-    public async Task<IActionResult> ReconnectGertec()
+    [HttpPost("gertec/refresh")]
+    public async Task<IActionResult> RefreshDataFile()
     {
         try
         {
-            // Reconecta ao servidor Gertec
-            var connected = await _gertecService.ReconnectAsync();
-
-            if (connected)
+            // Regenera arquivo de dados
+            var success = await _dataFileService.GenerateDataFileAsync();
+            
+            if (success)
             {
-                return Ok(new { message = "Reconectado ao servidor Gertec com sucesso", connected = true });
+                return Ok(new 
+                { 
+                    message = "Arquivo de dados atualizado com sucesso",
+                    filePath = _dataFileService.GetDataFilePath(),
+                    fileExists = _dataFileService.FileExists()
+                });
             }
-            return BadRequest(new { message = "Falha ao reconectar ao servidor Gertec", connected = false });
+            return BadRequest(new { message = "Falha ao atualizar arquivo de dados" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao reconectar ao servidor Gertec");
-            return StatusCode(500, new { message = "Erro ao reconectar", error = ex.Message });
+            _logger.LogError(ex, "Erro ao atualizar arquivo de dados");
+            return StatusCode(500, new { message = "Erro ao atualizar arquivo", error = ex.Message });
         }
     }
 
@@ -250,11 +211,6 @@ public class ConfigController : ControllerBase
         }
         return token.Substring(0, 4) + "..." + token.Substring(token.Length - 4);
     }
-}
-
-public class UpdateIpRequest
-{
-    public string IpAddress { get; set; } = string.Empty;
 }
 
 public class UpdateTokenRequest

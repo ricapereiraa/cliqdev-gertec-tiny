@@ -54,36 +54,6 @@ builder.Services.Configure<GertecConfig>(
 // Serviços
 builder.Services.AddHttpClient<OlistApiService>();
 builder.Services.AddSingleton<GertecDataFileService>();
-builder.Services.AddSingleton<GertecProductCacheService>();
-builder.Services.AddSingleton<GertecProtocolService>(sp =>
-{
-    var logger = sp.GetRequiredService<ILogger<GertecProtocolService>>();
-    var productCache = sp.GetRequiredService<GertecProductCacheService>();
-    
-    // Prioridade: Variáveis de ambiente > Configuration
-    // Formato no .env: GERTEC__IP_ADDRESS, GERTEC__PORT, etc.
-    var config = new GertecConfig
-    {
-        IpAddress = Environment.GetEnvironmentVariable("GERTEC__IP_ADDRESS") 
-            ?? builder.Configuration["Gertec:IpAddress"] 
-            ?? "0.0.0.0", // Escuta em todas as interfaces
-        Port = int.TryParse(Environment.GetEnvironmentVariable("GERTEC__PORT"), out var port) 
-            ? port 
-            : builder.Configuration.GetValue<int>("Gertec:Port", 6500),
-        ReconnectIntervalSeconds = int.TryParse(Environment.GetEnvironmentVariable("GERTEC__RECONNECT_INTERVAL_SECONDS"), out var reconnect) 
-            ? reconnect 
-            : builder.Configuration.GetValue<int>("Gertec:ReconnectIntervalSeconds", 5),
-        ResponseTimeoutMilliseconds = int.TryParse(Environment.GetEnvironmentVariable("GERTEC__RESPONSE_TIMEOUT_MILLISECONDS"), out var responseTimeout) 
-            ? responseTimeout 
-            : builder.Configuration.GetValue<int>("Gertec:ResponseTimeoutMilliseconds", 500),
-        ConnectionTimeoutMilliseconds = int.TryParse(Environment.GetEnvironmentVariable("GERTEC__CONNECTION_TIMEOUT_MILLISECONDS"), out var connectionTimeout) 
-            ? connectionTimeout 
-            : builder.Configuration.GetValue<int>("Gertec:ConnectionTimeoutMilliseconds", 15000)
-    };
-    
-    Console.WriteLine($"GertecConfig carregado - Port: {config.Port} (servidor TCP)");
-    return new GertecProtocolService(logger, config, productCache);
-});
 
 builder.Services.AddHostedService<IntegrationService>();
 

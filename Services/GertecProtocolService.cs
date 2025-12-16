@@ -18,7 +18,6 @@ public class GertecProtocolService : IDisposable
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private CancellationTokenSource? _listenerCancellationToken;
 
-    public event EventHandler<string>? BarcodeReceived;
     public bool IsConnected => _isConnected && _tcpClient?.Connected == true;
 
     public GertecProtocolService(

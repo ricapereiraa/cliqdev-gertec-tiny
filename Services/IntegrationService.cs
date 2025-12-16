@@ -6,27 +6,21 @@ namespace OlistGertecIntegration.Services;
 public class IntegrationService : BackgroundService
 {
     private readonly ILogger<IntegrationService> _logger;
-    private readonly GertecProtocolService _gertecService;
     private readonly OlistApiService _olistService;
     private readonly GertecDataFileService _dataFileService;
-    private readonly GertecProductCacheService _productCacheService;
     private readonly IConfiguration _configuration;
     private DateTime? _lastSyncDate;
     private readonly Dictionary<string, Produto> _productCache = new();
 
     public IntegrationService(
         ILogger<IntegrationService> logger,
-        GertecProtocolService gertecService,
         OlistApiService olistService,
         GertecDataFileService dataFileService,
-        GertecProductCacheService productCacheService,
         IConfiguration configuration)
     {
         _logger = logger;
-        _gertecService = gertecService;
         _olistService = olistService;
         _dataFileService = dataFileService;
-        _productCacheService = productCacheService;
         _configuration = configuration;
     }
 
@@ -46,9 +40,9 @@ public class IntegrationService : BackgroundService
             _logger.LogError(ex, "Erro ao pré-carregar cache. Continuando sem cache pré-carregado...");
         }
 
-        // Gera arquivo TXT inicial para servidor TCP oficial do Gertec
-        _logger.LogInformation("Gerando arquivo de dados inicial para servidor TCP Gertec...");
-        Console.WriteLine("Gerando arquivo de dados inicial para servidor TCP Gertec...");
+        // Gera arquivo TXT inicial
+        _logger.LogInformation("Gerando arquivo de dados inicial...");
+        Console.WriteLine("Gerando arquivo de dados inicial...");
         try
         {
             await _dataFileService.GenerateDataFileAsync();
@@ -58,50 +52,15 @@ public class IntegrationService : BackgroundService
             _logger.LogError(ex, "Erro ao gerar arquivo de dados inicial. Continuando...");
         }
 
-        // Carrega produtos do arquivo TXT no cache
-        _logger.LogInformation("Carregando produtos do arquivo TXT...");
-        Console.WriteLine("Carregando produtos do arquivo TXT...");
-        try
-        {
-            await _productCacheService.LoadProductsFromFileAsync();
-            var count = _productCacheService.GetProductCount();
-            _logger.LogInformation($"Produtos carregados no cache: {count} produtos");
-            Console.WriteLine($"Produtos carregados no cache: {count} produtos");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erro ao carregar produtos do arquivo. Continuando...");
-        }
+        // Inicia monitoramento automático - busca atualizações e atualiza arquivo a cada 1 minuto
+        _logger.LogInformation("Monitoramento automático iniciado - atualizando arquivo a cada 1 minuto");
+        Console.WriteLine("Monitoramento automático iniciado - atualizando arquivo a cada 1 minuto");
+        _ = Task.Run(() => MonitorPriceChangesAsync(stoppingToken), stoppingToken);
 
-        // Inicia servidor TCP para escutar conexões do Gertec
-        _logger.LogInformation("Iniciando servidor TCP para escutar conexões do Gertec...");
-        Console.WriteLine("Iniciando servidor TCP para escutar conexões do Gertec...");
-        await _gertecService.ConnectAsync();
-
-        // Inicia monitoramento de preços se habilitado
-        // Atualiza arquivo TXT e recarrega cache quando detecta mudanças
-        var monitoringEnabled = _configuration.GetValue<bool>("PriceMonitoring:Enabled");
-        if (monitoringEnabled)
-        {
-            _logger.LogInformation("Monitoramento de preços habilitado - atualizando arquivo TXT automaticamente");
-            Console.WriteLine("Monitoramento de preços habilitado - atualizando arquivo TXT automaticamente");
-            _ = Task.Run(() => MonitorPriceChangesAsync(stoppingToken), stoppingToken);
-        }
-
-        // Mantém o serviço rodando e recarrega produtos periodicamente
+        // Mantém o serviço rodando
         while (!stoppingToken.IsCancellationRequested)
         {
-            // Recarrega produtos do arquivo se foi modificado
-            try
-            {
-                await _productCacheService.RefreshIfNeededAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Erro ao recarregar produtos do arquivo");
-            }
-            
-            await Task.Delay(5000, stoppingToken);
+            await Task.Delay(60000, stoppingToken); // Aguarda 1 minuto
         }
     }
 
@@ -130,7 +89,8 @@ public class IntegrationService : BackgroundService
 
     private async Task MonitorPriceChangesAsync(CancellationToken cancellationToken)
     {
-        var intervalMinutes = _configuration.GetValue<int>("PriceMonitoring:CheckIntervalMinutes", 5);
+        // Intervalo fixo de 1 minuto
+        var intervalMinutes = 1;
         
         // Sincronização inicial completa na primeira execução
         bool primeiraExecucao = true;
@@ -139,7 +99,7 @@ public class IntegrationService : BackgroundService
         {
             try
             {
-                _logger.LogInformation("Verificando mudanças de preços no Tiny ERP...");
+                _logger.LogInformation("Buscando atualizações no Tiny ERP...");
                 Console.WriteLine("VERIFICANDO se há novos produtos ou mudanças de preços no Tiny ERP...");
 
                 // Busca todos os produtos do Tiny ERP
@@ -242,40 +202,37 @@ public class IntegrationService : BackgroundService
                         _logger.LogError(ex, "Erro ao atualizar cache do OlistApiService");
                     }
 
-                    // Regenera arquivo TXT completo quando há mudanças significativas ou na primeira execução
-                    if (primeiraExecucao || produtosAtualizados > 0 || produtosNovos > 10)
+                    // Regenera arquivo TXT completo quando há mudanças ou na primeira execução
+                    if (primeiraExecucao || produtosAtualizados > 0 || produtosNovos > 0)
                     {
-                        _logger.LogInformation("Regenerando arquivo de dados Gertec com todos os produtos...");
-                        Console.WriteLine("Regenerando arquivo de dados Gertec com todos os produtos...");
+                        _logger.LogInformation("Regenerando arquivo de dados com todos os produtos...");
+                        Console.WriteLine("Regenerando arquivo de dados com todos os produtos...");
                         try
                         {
                             await _dataFileService.GenerateDataFileAsync();
-                            
-                            // Recarrega produtos do arquivo atualizado
-                            await _productCacheService.LoadProductsFromFileAsync();
-                            var count = _productCacheService.GetProductCount();
-                            _logger.LogInformation($"Produtos recarregados do arquivo: {count} produtos");
-                            Console.WriteLine($"Produtos recarregados do arquivo: {count} produtos");
+                            _logger.LogInformation("Arquivo de dados atualizado com sucesso");
+                            Console.WriteLine("Arquivo de dados atualizado com sucesso");
                         }
                         catch (Exception fileEx)
                         {
-                            _logger.LogError(fileEx, "Erro ao regenerar arquivo de dados Gertec");
+                            _logger.LogError(fileEx, "Erro ao regenerar arquivo de dados");
                         }
                     }
                 }
                 
                 if (primeiraExecucao)
                 {
-                    _logger.LogInformation($"Sincronização inicial concluída: {produtos.Count} produtos no cache. " +
-                                          $"Próxima verificação em {intervalMinutes} minutos.");
+                    _logger.LogInformation($"Sincronização inicial concluída: {produtos.Count} produtos no arquivo. " +
+                                          $"Próxima verificação em {intervalMinutes} minuto(s).");
+                    Console.WriteLine($"Sincronização inicial concluída: {produtos.Count} produtos. Próxima verificação em {intervalMinutes} minuto(s).");
                     primeiraExecucao = false;
                 }
                 else
                 {
-                    _logger.LogInformation($"Monitoramento concluído: {produtosAtualizados} produtos atualizados, " +
-                                          $"{produtosNovos} produtos novos. Cache atualizado. Próxima verificação em {intervalMinutes} minutos.");
-                    Console.WriteLine($"Monitoramento concluído: {produtosAtualizados} produtos atualizados, " +
-                                     $"{produtosNovos} produtos novos. Próxima verificação em {intervalMinutes} minutos.");
+                    _logger.LogInformation($"Atualização concluída: {produtosAtualizados} produtos atualizados, " +
+                                          $"{produtosNovos} produtos novos. Arquivo atualizado. Próxima verificação em {intervalMinutes} minuto(s).");
+                    Console.WriteLine($"Atualização concluída: {produtosAtualizados} produtos atualizados, " +
+                                     $"{produtosNovos} produtos novos. Próxima verificação em {intervalMinutes} minuto(s).");
                 }
             }
             catch (Exception ex)
@@ -283,6 +240,7 @@ public class IntegrationService : BackgroundService
                 _logger.LogError(ex, "Erro no monitoramento de preços");
             }
 
+            // Aguarda 1 minuto antes da próxima verificação
             await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), cancellationToken);
         }
     }

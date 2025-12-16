@@ -296,51 +296,96 @@ public class OlistApiService
         }
     }
 
+    /// <summary>
+    /// Busca TODOS os produtos do Tiny ERP sem limite de paginação
+    /// Garante que todos os produtos cadastrados sejam retornados
+    /// </summary>
     public async Task<List<Produto>> GetAllProductsAsync(DateTime? sinceDate = null)
     {
         try
         {
-            var content = new FormUrlEncodedContent(new[]
-            {
-                new KeyValuePair<string, string>("token", _token),
-                new KeyValuePair<string, string>("formato", _format)
-            });
+            var todosProdutos = new List<Produto>();
+            int pagina = 1;
+            const int produtosPorPagina = 100; // Limite padrão da API Tiny
+            int numeroPaginas = 0;
 
-            var response = await _httpClient.PostAsync($"{_baseUrl}/produtos.pesquisa.php", content);
-            response.EnsureSuccessStatusCode();
+            _logger.LogInformation("Buscando TODOS os produtos do Tiny ERP (com paginacao se necessario)...");
+            Console.WriteLine("Buscando TODOS os produtos do Tiny ERP...");
 
-            var responseContent = await response.Content.ReadAsStringAsync();
-            
-            // Log detalhado apenas em desenvolvimento
-            if (_logger.IsEnabled(LogLevel.Debug))
+            // Loop para buscar todas as páginas
+            do
             {
-                _logger.LogDebug($"Resposta da API Olist (todos produtos): {responseContent}");
-            }
+                var content = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("token", _token),
+                    new KeyValuePair<string, string>("formato", _format),
+                    new KeyValuePair<string, string>("pagina", pagina.ToString()),
+                    new KeyValuePair<string, string>("registrosPorPagina", produtosPorPagina.ToString())
+                });
 
-            // Estrutura baseada na documentação oficial
-            var apiResponse = JsonConvert.DeserializeObject<TinyApiResponse>(responseContent);
-            
-            if (apiResponse?.Retorno?.Status == "OK" && apiResponse.Retorno.Produtos != null)
-            {
-                // Extrai a lista de produtos do wrapper
-                return apiResponse.Retorno.Produtos
-                    .Where(p => p.Produto != null)
-                    .Select(p => p.Produto!)
-                    .ToList();
-            }
-            
-            // Se houver erro, loga
-            if (apiResponse?.Retorno?.Status == "Erro")
-            {
-                var erros = apiResponse.Retorno.Erros?.Select(e => e.Erro).ToList() ?? new List<string>();
-                _logger.LogWarning($"Erro na API Olist: {string.Join(", ", erros)}");
-            }
+                var response = await _httpClient.PostAsync($"{_baseUrl}/produtos.pesquisa.php", content);
+                response.EnsureSuccessStatusCode();
 
-            return new List<Produto>();
+                var responseContent = await response.Content.ReadAsStringAsync();
+                
+                // Log detalhado apenas em desenvolvimento
+                if (_logger.IsEnabled(LogLevel.Debug))
+                {
+                    _logger.LogDebug($"Resposta da API Olist (pagina {pagina}): {responseContent.Substring(0, Math.Min(500, responseContent.Length))}...");
+                }
+
+                // Estrutura baseada na documentação oficial
+                var apiResponse = JsonConvert.DeserializeObject<TinyApiResponse>(responseContent);
+                
+                if (apiResponse?.Retorno?.Status == "OK" && apiResponse.Retorno.Produtos != null)
+                {
+                    var produtosPagina = apiResponse.Retorno.Produtos
+                        .Where(p => p.Produto != null)
+                        .Select(p => p.Produto!)
+                        .ToList();
+
+                    todosProdutos.AddRange(produtosPagina);
+                    
+                    // Obtém número total de páginas na primeira resposta
+                    if (pagina == 1)
+                    {
+                        numeroPaginas = apiResponse.Retorno.NumeroPaginas;
+                        _logger.LogInformation($"Total de paginas: {numeroPaginas}. Produtos por pagina: {produtosPorPagina}");
+                        Console.WriteLine($"Total de paginas: {numeroPaginas}");
+                    }
+                    
+                    _logger.LogInformation($"Pagina {pagina}/{numeroPaginas}: {produtosPagina.Count} produtos encontrados. Total acumulado: {todosProdutos.Count}");
+                    Console.WriteLine($"Pagina {pagina}/{numeroPaginas}: {produtosPagina.Count} produtos. Total: {todosProdutos.Count}");
+
+                    pagina++;
+                    
+                    // Pequeno delay para não sobrecarregar a API
+                    if (pagina <= numeroPaginas)
+                    {
+                        await Task.Delay(200);
+                    }
+                }
+                else
+                {
+                    // Se houver erro, loga e para
+                    if (apiResponse?.Retorno?.Status == "Erro")
+                    {
+                        var erros = apiResponse.Retorno.Erros?.Select(e => e.Erro).ToList() ?? new List<string>();
+                        _logger.LogWarning($"Erro na API Olist (pagina {pagina}): {string.Join(", ", erros)}");
+                    }
+                    break;
+                }
+            } while (pagina <= numeroPaginas && numeroPaginas > 0);
+
+            _logger.LogInformation($"Busca completa finalizada: {todosProdutos.Count} produtos encontrados no total");
+            Console.WriteLine($"Busca completa finalizada: {todosProdutos.Count} produtos encontrados no total");
+
+            return todosProdutos;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao buscar todos os produtos");
+            Console.WriteLine($"Erro ao buscar todos os produtos: {ex.Message}");
             return new List<Produto>();
         }
     }

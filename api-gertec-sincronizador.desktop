@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=API Gertec - Sincronizador
+Comment=API Gertec - Sincronizador Tiny ERP - Atualiza arquivo de produtos automaticamente
+Exec=dotnet run
+Path=/home/ricardopereira/Área de trabalho/projetos/api-carol
+Icon=application-x-executable
+Terminal=true
+Categories=Utility;Network;Development;
+StartupNotify=true
+Keywords=gertec;tiny;erp;api;sincronizador;produtos
+
